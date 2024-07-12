@@ -198,6 +198,21 @@ IREE_TYPED_ATOMIC_SLIST_WRAPPER(iree_hal_hip_ready_action,
                                 offsetof(iree_hal_hip_atomic_slist_entry_t,
                                          slist_next));
 
+// Ready action atomic slist entry struct.
+typedef struct iree_hal_hip_atomic_slist_completion_t {
+  void (*callback)(void* user_data);
+  void* user_data;
+  hipEvent_t event;
+  bool created_event;
+  iree_atomic_slist_intrusive_ptr_t slist_next;
+} iree_hal_hip_atomic_slist_completion_t;
+
+// Ready action atomic slist.
+IREE_TYPED_ATOMIC_SLIST_WRAPPER(iree_hal_hip_completion,
+                                iree_hal_hip_atomic_slist_completion_t,
+                                offsetof(iree_hal_hip_atomic_slist_completion_t,
+                                         slist_next));
+
 static void iree_hal_hip_ready_action_slist_destroy(
     iree_hal_hip_ready_action_slist_t* list, iree_allocator_t host_allocator) {
   while (true) {
@@ -208,6 +223,23 @@ static void iree_hal_hip_ready_action_slist_destroy(
     iree_allocator_free(host_allocator, entry);
   }
   iree_hal_hip_ready_action_slist_deinitialize(list);
+}
+
+static void iree_hal_hip_completion_slist_destroy(
+    iree_hal_hip_completion_slist_t* list, 
+    const iree_hal_hip_dynamic_symbols_t* symbols,
+    iree_allocator_t host_allocator) {
+  while (true) {
+    iree_hal_hip_atomic_slist_completion_t* entry =
+        iree_hal_hip_completion_slist_pop(list);
+    if (!entry) break;
+    if (entry->created_event) {
+      IREE_HIP_IGNORE_ERROR(symbols, 
+        hipEventDestroy(entry->event));
+    }
+    iree_allocator_free(host_allocator, entry);
+  }
+  iree_hal_hip_completion_slist_deinitialize(list);
 }
 
 static iree_hal_hip_queue_action_t* iree_hal_hip_atomic_slist_entry_pop_front(
@@ -275,6 +307,31 @@ typedef struct iree_hal_hip_working_area_t {
   iree_allocator_t host_allocator;  // const
 } iree_hal_hip_working_area_t;
 
+typedef struct iree_hal_hip_completion_area_t {
+  // Notification from the parent thread to request worker state changes.
+  iree_notification_t state_notification;
+  // Notification to the parent thread to indicate the worker committed exiting.
+  // TODO: maybe remove this. We can just wait on the worker thread to exit.
+  iree_notification_t exit_notification;
+  iree_hal_hip_completion_slist_t completion_list;  // atomic
+  iree_atomic_int32_t worker_state;                  // atomic
+  // TODO: use status to provide more context for the error.
+  iree_atomic_intptr_t error_code;  // atomic
+  const iree_hal_hip_dynamic_symbols_t* symbols;
+  // The number of asynchronous work items that are scheduled and not
+  // complete.
+  // These are
+  // * the number of callbacks that are scheduled on the host stream.
+  // * the number of pending action cleanup.
+  // We need to wait for them to finish before destroying the context.
+  iree_slim_mutex_t pending_completion_items_count_mutex;
+  iree_notification_t pending_completion_items_count_notification;
+  int32_t pending_completion_items_count
+      IREE_GUARDED_BY(pending_completion_items_count_mutex);
+
+  iree_allocator_t host_allocator;  // const
+} iree_hal_hip_completion_area_t;
+
 static void iree_hal_hip_working_area_initialize(
     iree_allocator_t host_allocator,
     iree_hal_hip_working_area_t* working_area) {
@@ -304,9 +361,44 @@ static void iree_hal_hip_working_area_deinitialize(
       &working_area->pending_work_items_count_notification);
 }
 
+static void iree_hal_hip_completion_area_initialize(
+    iree_allocator_t host_allocator,
+    const iree_hal_hip_dynamic_symbols_t* symbols,
+    iree_hal_hip_completion_area_t* completion_area) {
+  iree_notification_initialize(&completion_area->state_notification);
+  iree_notification_initialize(&completion_area->exit_notification);
+  iree_hal_hip_completion_slist_initialize(&completion_area->completion_list);
+  iree_atomic_store_int32(&completion_area->worker_state,
+                          IREE_HAL_HIP_WORKER_STATE_IDLE_WAITING,
+                          iree_memory_order_release);
+  iree_atomic_store_int32(&completion_area->error_code, IREE_STATUS_OK,
+                          iree_memory_order_release);
+  iree_slim_mutex_initialize(&completion_area->pending_completion_items_count_mutex);
+  iree_notification_initialize(
+      &completion_area->pending_completion_items_count_notification);
+  completion_area->pending_completion_items_count = 0;
+  completion_area->host_allocator = host_allocator;
+  completion_area->symbols = symbols;
+}
+
+static void iree_hal_hip_completion_area_deinitialize(
+    iree_hal_hip_completion_area_t* completion_area) {
+  iree_hal_hip_completion_slist_destroy(&completion_area->completion_list,
+                                          completion_area->symbols,
+                                          completion_area->host_allocator);
+  iree_notification_deinitialize(&completion_area->exit_notification);
+  iree_notification_deinitialize(&completion_area->state_notification);
+  iree_slim_mutex_deinitialize(&completion_area->pending_completion_items_count_mutex);
+  iree_notification_deinitialize(
+      &completion_area->pending_completion_items_count_notification);
+}
+
 // The main function for the ready-list processing worker thread.
 static int iree_hal_hip_worker_execute(
     iree_hal_hip_working_area_t* working_area);
+
+static int iree_hal_hip_completion_execute(
+    iree_hal_hip_completion_area_t* working_area);
 
 //===----------------------------------------------------------------------===//
 // Pending queue actions
@@ -334,8 +426,15 @@ struct iree_hal_hip_pending_queue_actions_t {
   // The worker thread that monitors incoming requests and issues ready actions
   // to the GPU.
   iree_thread_t* worker_thread;
+
+  // Worker thread to wait on completion events instead of running
+  // synchronous completion callbacks
+  iree_thread_t* completion_thread;
+
   // The worker's working area; data exchange place with the parent thread.
   iree_hal_hip_working_area_t working_area;
+
+  iree_hal_hip_completion_area_t completion_area;
 };
 
 static const iree_hal_resource_vtable_t
@@ -366,6 +465,9 @@ iree_status_t iree_hal_hip_pending_queue_actions_create(
   iree_hal_hip_working_area_t* working_area = &actions->working_area;
   iree_hal_hip_working_area_initialize(host_allocator, working_area);
 
+  iree_hal_hip_completion_area_t* completion_area = &actions->completion_area;
+  iree_hal_hip_completion_area_initialize(host_allocator, symbols, completion_area);
+
   // Create the ready-list processing worker itself.
   iree_thread_create_params_t params;
   memset(&params, 0, sizeof(params));
@@ -374,6 +476,14 @@ iree_status_t iree_hal_hip_pending_queue_actions_create(
   iree_status_t status = iree_thread_create(
       (iree_thread_entry_t)iree_hal_hip_worker_execute, working_area, params,
       actions->host_allocator, &actions->worker_thread);
+
+  params.name = IREE_SV("completion_worker");
+  params.create_suspended = false;
+  if (iree_status_is_ok(status)) {
+    status = iree_thread_create(
+      (iree_thread_entry_t)iree_hal_hip_completion_execute, completion_area, params,
+      actions->host_allocator, &actions->completion_thread);
+  }
 
   if (iree_status_is_ok(status)) {
     *out_actions = actions;
@@ -520,7 +630,7 @@ iree_status_t iree_hal_hip_pending_queue_actions_enqueue_execution(
   action->kind = IREE_HAL_HIP_QUEUE_ACTION_TYPE_EXECUTION;
   action->device = device;
   action->dispatch_hip_stream = dispatch_stream;
-  action->callback_hip_stream = callback_stream;
+  action->callback_hip_stream = dispatch_stream;//callback_stream;
 
   // Initialize scratch fields.
   action->event_count = 0;
@@ -646,6 +756,23 @@ static void iree_hal_hip_post_error_to_worker_state(
   iree_notification_post(&working_area->state_notification, IREE_ALL_WAITERS);
 }
 
+static void iree_hal_hip_post_error_to_completion_state(
+    iree_hal_hip_completion_area_t* completion_area, iree_status_code_t code) {
+  // Write error code, but don't overwrite existing error codes.
+  intptr_t prev_error_code = IREE_STATUS_OK;
+  iree_atomic_compare_exchange_strong_int32(
+      &completion_area->error_code, /*expected=*/&prev_error_code,
+      /*desired=*/code,
+      /*order_succ=*/iree_memory_order_acq_rel,
+      /*order_fail=*/iree_memory_order_acquire);
+
+  // This state has the highest priority so just overwrite.
+  iree_atomic_store_int32(&completion_area->worker_state,
+                          IREE_HAL_HIP_WORKER_STATE_EXIT_ERROR,
+                          iree_memory_order_release);
+  iree_notification_post(&completion_area->state_notification, IREE_ALL_WAITERS);
+}
+
 // Releases resources after action completion on the GPU and advances timeline
 // and pending actions queue.
 //
@@ -704,6 +831,10 @@ static iree_status_t iree_hal_hip_pending_queue_actions_issue_execution(
   const iree_hal_hip_dynamic_symbols_t* symbols =
       action->owning_actions->symbols;
   IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, symbols,
+        hipSetDevice(iree_hal_hip_device_get_device(action->device)),
+        "hipSetDevice");
 
   // No need to lock given that this action is already detched from the pending
   // actions list; so only this thread is seeing it now.
@@ -772,7 +903,10 @@ static iree_status_t iree_hal_hip_pending_queue_actions_issue_execution(
       iree_hal_resource_release(stream_command_buffer);
     }
   }
+
+  hipEvent_t evt = NULL;
   IREE_TRACE_ZONE_END(z_dispatch_command_buffers);
+  //fprintf(stderr, "--------------------\n");
 
   // Last record hipEvent_t signals in the dispatch stream.
   for (iree_host_size_t i = 0; i < action->signal_semaphore_list.count; ++i) {
@@ -787,13 +921,22 @@ static iree_status_t iree_hal_hip_pending_queue_actions_issue_execution(
     IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
         z0, symbols, hipEventRecord(event, action->dispatch_hip_stream),
         "hipEventRecord");
-    // Let the callback stream to wait on the hipEvent_t.
-    IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, symbols,
-        hipStreamWaitEvent(action->callback_hip_stream, event, /*flags=*/0),
-        "hipStreamWaitEvent");
+    evt = event;
   }
 
+  bool created_event = false;
+  if (!evt) {
+    IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, symbols,
+      hipEventCreateWithFlags(&evt, hipEventDisableTiming),
+      "hipEventCreateWithFlags");
+    created_event = true;
+  }
+  
+  IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+    z0, symbols,
+    hipEventRecord(evt, action->dispatch_hip_stream),
+    "hipEventRecord");
   iree_slim_mutex_lock(
       &action->owning_actions->working_area.pending_work_items_count_mutex);
   // One work item is the host stream callback.
@@ -802,14 +945,55 @@ static iree_status_t iree_hal_hip_pending_queue_actions_issue_execution(
   iree_slim_mutex_unlock(
       &action->owning_actions->working_area.pending_work_items_count_mutex);
 
-  // Now launch a host function on the callback stream to advance the semaphore
-  // timeline.
-  IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, symbols,
-      hipLaunchHostFunc(action->callback_hip_stream,
-                        iree_hal_hip_execution_device_signal_host_callback,
-                        action),
-      "hipLaunchHostFunc");
+  iree_hal_hip_atomic_slist_completion_t* entry = NULL;
+  // TODO: avoid host allocator malloc; use some pool for the allocation.
+  iree_status_t status = iree_allocator_malloc(action->owning_actions->host_allocator, sizeof(*entry),
+                                   (void**)&entry);
+
+  if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
+    // Release all actions in the ready list to avoid leaking.
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
+  // Now push the ready list to the worker and have it to issue the actions to
+  // the GPU.
+  entry->event = evt;
+  entry->created_event = created_event;
+  entry->callback = iree_hal_hip_execution_device_signal_host_callback;
+  entry->user_data = action;
+  iree_hal_hip_completion_slist_push(&action->owning_actions->completion_area.completion_list,
+                                       entry);
+
+  iree_slim_mutex_lock(
+    &action->owning_actions->completion_area.pending_completion_items_count_mutex
+  );
+
+  action->owning_actions->completion_area.pending_completion_items_count += 1;
+
+  iree_slim_mutex_unlock(
+    &action->owning_actions->completion_area.pending_completion_items_count_mutex
+  );
+
+  // We can only overwrite the worker state if the previous state is idle
+  // waiting; we cannot overwrite exit related states. so we need to perform
+  // atomic compare and exchange here.
+  iree_hal_hip_worker_state_t prev_state =
+      IREE_HAL_HIP_WORKER_STATE_IDLE_WAITING;
+  iree_atomic_compare_exchange_strong_int32(
+      &action->owning_actions->completion_area.worker_state, /*expected=*/&prev_state,
+      /*desired=*/IREE_HAL_HIP_WORKER_STATE_WORKLOAD_PENDING,
+      /*order_succ=*/iree_memory_order_acq_rel,
+      /*order_fail=*/iree_memory_order_acquire);
+  iree_notification_post(&action->owning_actions->completion_area.state_notification,
+                         IREE_ALL_WAITERS);
+
+  // Handle potential error cases from the worker thread.
+  if (prev_state == IREE_HAL_HIP_WORKER_STATE_EXIT_ERROR) {
+    iree_status_code_t code = iree_atomic_load_int32(
+        &action->owning_actions->completion_area.error_code, iree_memory_order_acquire);
+    status = iree_status_from_code(code);
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -990,6 +1174,15 @@ static bool iree_hal_hip_worker_has_incoming_request_or_error(
          value == IREE_HAL_HIP_WORKER_STATE_EXIT_ERROR;
 }
 
+static bool iree_hal_hip_completion_has_incoming_request_or_error(
+    iree_hal_hip_completion_area_t* working_area) {
+  iree_hal_hip_worker_state_t value = iree_atomic_load_int32(
+      &working_area->worker_state, iree_memory_order_acquire);
+  return value == IREE_HAL_HIP_WORKER_STATE_WORKLOAD_PENDING ||
+         value == IREE_HAL_HIP_WORKER_STATE_EXIT_REQUESTED ||
+         value == IREE_HAL_HIP_WORKER_STATE_EXIT_ERROR;
+}
+
 static bool iree_hal_hip_worker_committed_exiting(
     iree_hal_hip_working_area_t* working_area) {
   return iree_atomic_load_int32(&working_area->worker_state,
@@ -1051,6 +1244,14 @@ static bool iree_hal_hip_worker_has_no_pending_work_items(
   return result;
 }
 
+static bool iree_hal_hip_completion_has_no_pending_completion_items(
+    iree_hal_hip_completion_area_t* completion_area) {
+  iree_slim_mutex_lock(&completion_area->pending_completion_items_count_mutex);
+  bool result = (completion_area->pending_completion_items_count == 0);
+  iree_slim_mutex_unlock(&completion_area->pending_completion_items_count_mutex);
+  return result;
+}
+
 // Wait for all work items to finish.
 static void iree_hal_hip_worker_wait_pending_work_items(
     iree_hal_hip_working_area_t* working_area) {
@@ -1062,6 +1263,119 @@ static void iree_hal_hip_worker_wait_pending_work_items(
   // Not even touching the notification.
   iree_slim_mutex_lock(&working_area->pending_work_items_count_mutex);
   iree_slim_mutex_unlock(&working_area->pending_work_items_count_mutex);
+}
+
+// Wait for all work items to finish.
+static void iree_hal_hip_completion_wait_pending_completion_items(
+    iree_hal_hip_completion_area_t* completion_area) {
+  iree_notification_await(
+      &completion_area->pending_completion_items_count_notification,
+      (iree_condition_fn_t)iree_hal_hip_completion_has_no_pending_completion_items,
+      completion_area, iree_infinite_timeout());
+  // Lock then unlock to make sure that all callbacks are really done.
+  // Not even touching the notification.
+  iree_slim_mutex_lock(&completion_area->pending_completion_items_count_mutex);
+  iree_slim_mutex_unlock(&completion_area->pending_completion_items_count_mutex);
+}
+
+// The main function for the ready-list processing worker thread.
+static int iree_hal_hip_completion_execute(
+    iree_hal_hip_completion_area_t* completion_area) {
+  iree_hal_hip_completion_slist_t* worklist = &completion_area->completion_list;
+
+  while(true) {
+    //fprintf(stderr, "Starting wait\n");
+    iree_notification_await(
+    &completion_area->state_notification,
+    (iree_condition_fn_t)iree_hal_hip_completion_has_incoming_request_or_error,
+    completion_area, iree_infinite_timeout());
+    //fprintf(stderr, "Ending wait\n");
+    IREE_TRACE_ZONE_BEGIN(z0);
+    // Immediately flip the state to idle waiting if and only if the previous
+    // state is workload pending. We do it before processing ready list to make
+    // sure that we don't accidentally ignore new workload pushed after done
+    // ready list processing but before overwriting the state from this worker
+    // thread. Also we don't want to overwrite other exit states. So we need to
+    // perform atomic compare and exchange here.
+    iree_hal_hip_worker_state_t prev_state =
+        IREE_HAL_HIP_WORKER_STATE_WORKLOAD_PENDING;
+    iree_atomic_compare_exchange_strong_int32(
+        &completion_area->worker_state, /*expected=*/&prev_state,
+        /*desired=*/IREE_HAL_HIP_WORKER_STATE_IDLE_WAITING,
+        /*order_succ=*/iree_memory_order_acq_rel,
+        /*order_fail=*/iree_memory_order_acquire);
+       
+    int32_t worker_state = iree_atomic_load_int32(&completion_area->worker_state,
+                                                  iree_memory_order_acquire);
+    // Exit if HIP callbacks have posted any errors.
+    if (IREE_UNLIKELY(worker_state == IREE_HAL_HIP_WORKER_STATE_EXIT_ERROR)) {
+      iree_hal_hip_completion_wait_pending_completion_items(completion_area);
+      IREE_TRACE_ZONE_END(z0);
+      return -1;
+    }
+    // Check if we received request to stop processing and exit this thread.
+    bool should_exit =
+        (worker_state == IREE_HAL_HIP_WORKER_STATE_EXIT_REQUESTED);
+    
+    iree_status_t status = iree_ok_status();
+    while (true) {
+      iree_hal_hip_atomic_slist_completion_t* entry =
+          iree_hal_hip_completion_slist_pop(worklist);
+      if (!entry) break;
+
+      const iree_hal_hip_dynamic_symbols_t* symbols =
+        completion_area->symbols;
+      IREE_TRACE_ZONE_BEGIN(z1);
+      hipError_t result = symbols->hipEventSynchronize(entry->event);
+      IREE_TRACE_ZONE_END(z1);
+      if (IREE_UNLIKELY(result != hipSuccess)) {
+        // Let common destruction path take care of destroying the worklist.
+        // When we know all host stream callbacks are done and not touching
+        // anything.
+        iree_hal_hip_completion_slist_push(worklist, entry);
+        break;
+      }
+      entry->callback(entry->user_data);
+
+      if (entry->created_event) {
+        IREE_HIP_IGNORE_ERROR(symbols,
+                        hipEventDestroy(entry->event));
+      }
+      iree_allocator_free(completion_area->host_allocator, entry);
+    }
+
+    if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
+      iree_hal_hip_completion_has_no_pending_completion_items(completion_area);
+      iree_hal_hip_post_error_to_completion_state(completion_area,
+                                              iree_status_code(status));
+      IREE_TRACE_ZONE_END(z0);  
+      return -1;
+    }
+
+    if (IREE_UNLIKELY(
+            should_exit &&
+            iree_hal_hip_completion_has_no_pending_completion_items(completion_area))) {
+      iree_hal_hip_completion_has_no_pending_completion_items(completion_area);
+      // Signal that this thread is committed to exit.
+      // This state has a priority that is only lower than error exit.
+      // A HIP callback may have posted an error, make sure we don't
+      // overwrite this error state.
+      iree_hal_hip_worker_state_t prev_state =
+          IREE_HAL_HIP_WORKER_STATE_EXIT_REQUESTED;
+      iree_atomic_compare_exchange_strong_int32(
+          &completion_area->worker_state, /*expected=*/&prev_state,
+          /*desired=*/IREE_HAL_HIP_WORKER_STATE_EXIT_COMMITTED,
+          /*order_succ=*/iree_memory_order_acq_rel,
+          /*order_fail=*/iree_memory_order_acquire);
+      iree_notification_post(&completion_area->exit_notification,
+                             IREE_ALL_WAITERS);
+      IREE_TRACE_ZONE_END(z0);
+      return 0;
+    }
+    IREE_TRACE_ZONE_END(z0);
+  }
+  
+  return 0;
 }
 
 // The main function for the ready-list processing worker thread.

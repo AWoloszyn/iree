@@ -225,7 +225,7 @@ static iree_status_t iree_hal_rocm_direct_command_buffer_fill_buffer(
   iree_hal_rocm_direct_command_buffer_t* command_buffer =
       iree_hal_rocm_direct_command_buffer_cast(base_command_buffer);
 
-  IREE_ROCM_TRACE_ZONE_BEGIN(command_buffer->tracing_context, 0);
+  //IREE_ROCM_TRACE_ZONE_BEGIN(command_buffer->tracing_context, 0);
 
   hipDeviceptr_t target_device_buffer = iree_hal_rocm_buffer_device_pointer(
       iree_hal_buffer_allocated_buffer(target_ref.buffer));
@@ -266,7 +266,7 @@ static iree_status_t iree_hal_rocm_direct_command_buffer_fill_buffer(
     }
   }
 
-  IREE_ROCM_TRACE_ZONE_END(command_buffer->tracing_context, 0);
+  //IREE_ROCM_TRACE_ZONE_END(command_buffer->tracing_context, 0);
   return status;
 }
 
@@ -309,7 +309,7 @@ static iree_status_t iree_hal_rocm_direct_command_buffer_copy_buffer(
   iree_hal_rocm_direct_command_buffer_t* command_buffer =
       iree_hal_rocm_direct_command_buffer_cast(base_command_buffer);
 
-  IREE_ROCM_TRACE_ZONE_BEGIN(command_buffer->tracing_context, 0);
+  //IREE_ROCM_TRACE_ZONE_BEGIN(command_buffer->tracing_context, 0);
 
   hipDeviceptr_t target_device_buffer = iree_hal_rocm_buffer_device_pointer(
       iree_hal_buffer_allocated_buffer(target_ref.buffer));
@@ -330,7 +330,7 @@ static iree_status_t iree_hal_rocm_direct_command_buffer_copy_buffer(
       hipMemcpyAsync(dst, src, target_ref.length, hipMemcpyDeviceToDevice, 0),
       "hipMemcpyAsync");
 
-  IREE_ROCM_TRACE_ZONE_END(command_buffer->tracing_context, 0);
+  //IREE_ROCM_TRACE_ZONE_END(command_buffer->tracing_context, 0);
   return status;
 }
 
@@ -426,12 +426,12 @@ static iree_status_t iree_hal_rocm_direct_command_buffer_dispatch(
     iree_hal_rocm_source_location_t source_location;
     iree_hal_rocm_native_executable_entry_point_source_location(
         executable, entry_point, &source_location);
-    IREE_ROCM_TRACE_ZONE_BEGIN_EXTERNAL(
-        command_buffer->tracing_context, /*stream=*/0,
-        source_location.file_name.data, source_location.file_name.size,
-        source_location.line, source_location.func_name.data,
-        source_location.func_name.size,
-        /*name=*/NULL, 0);
+    //IREE_ROCM_TRACE_ZONE_BEGIN_EXTERNAL(
+    //    command_buffer->tracing_context, /*stream=*/0,
+    //    source_location.file_name.data, source_location.file_name.size,
+    //    source_location.line, source_location.func_name.data,
+    //    source_location.func_name.size,
+    //    /*name=*/NULL, 0);
   });
 
   // Patch the push constants in the kernel arguments.
@@ -456,7 +456,7 @@ static iree_status_t iree_hal_rocm_direct_command_buffer_dispatch(
           command_buffer->current_descriptor, NULL),
       "hipModuleLaunchKernel");
 
-  IREE_ROCM_TRACE_ZONE_END(command_buffer->tracing_context, 0);
+  //IREE_ROCM_TRACE_ZONE_END(command_buffer->tracing_context, 0);
   return iree_ok_status();
 }
 

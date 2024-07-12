@@ -516,7 +516,7 @@ static iree_status_t iree_hal_hip_graph_command_buffer_fill_buffer(
   iree_hal_hip_graph_command_buffer_t* command_buffer =
       iree_hal_hip_graph_command_buffer_cast(base_command_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_BEGIN(command_buffer);
+  //IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_BEGIN(command_buffer);
 
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_hip_graph_command_buffer_flush_collectives(command_buffer));
@@ -554,7 +554,7 @@ static iree_status_t iree_hal_hip_graph_command_buffer_fill_buffer(
           dependency_count, &params),
       "hipGraphAddMemsetNode");
 
-  IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_END(command_buffer);
+  //IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_END(command_buffer);
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -570,7 +570,7 @@ static iree_status_t iree_hal_hip_graph_command_buffer_update_buffer(
                             "cannot use graph-based command buffer");
   }
   IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_BEGIN(command_buffer);
+  //IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_BEGIN(command_buffer);
 
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_hip_graph_command_buffer_flush_collectives(command_buffer));
@@ -622,7 +622,7 @@ static iree_status_t iree_hal_hip_graph_command_buffer_update_buffer(
           dependency_count, &params, command_buffer->hip_context),
       "hipDrvGraphAddMemcpyNode");
 
-  IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_END(command_buffer);
+  //IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_END(command_buffer);
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -638,7 +638,7 @@ static iree_status_t iree_hal_hip_graph_command_buffer_copy_buffer(
                             "cannot use graph-based command buffer");
   }
   IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_BEGIN(command_buffer);
+  //IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_BEGIN(command_buffer);
 
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_hip_graph_command_buffer_flush_collectives(command_buffer));
@@ -684,7 +684,7 @@ static iree_status_t iree_hal_hip_graph_command_buffer_copy_buffer(
           dependency_count, &params, command_buffer->hip_context),
       "hipDrvGraphAddMemcpyNode");
 
-  IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_END(command_buffer);
+  //IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_END(command_buffer);
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -786,11 +786,11 @@ static iree_status_t iree_hal_hip_graph_command_buffer_dispatch(
       z0, iree_hal_hip_native_executable_entry_point_kernel_info(
               executable, entry_point, &kernel_info));
 
-  IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_BEGIN_EXTERNAL(
-      command_buffer, kernel_info.source_filename.data,
-      kernel_info.source_filename.size, kernel_info.source_line,
-      kernel_info.function_name.data, kernel_info.function_name.size,
-      /*name=*/NULL, 0);
+  //IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_BEGIN_EXTERNAL(
+  //    command_buffer, kernel_info.source_filename.data,
+  //    kernel_info.source_filename.size, kernel_info.source_line,
+  //    kernel_info.function_name.data, kernel_info.function_name.size,
+  //    /*name=*/NULL, 0);
 
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_resource_set_insert(command_buffer->resource_set, 1,
@@ -874,7 +874,7 @@ static iree_status_t iree_hal_hip_graph_command_buffer_dispatch(
           dependency_count, &params),
       "hipGraphAddKernelNode");
 
-  IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_END(command_buffer);
+  //IREE_HIP_GRAPH_COMMAND_BUFFER_TRACE_ZONE_END(command_buffer);
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
