@@ -326,9 +326,10 @@ static iree_status_t iree_hal_hip_get_nccl_reduction_type(
 }
 
 static iree_status_t iree_hal_hip_nccl_submit_batch_entry(
-    const iree_hal_collective_batch_entry_t* entry, hipStream_t stream) {
+    const iree_hal_collective_batch_entry_t* entry,
+    iree_hal_hip_queue_t* queue) {
   IREE_ASSERT_ARGUMENT(entry);
-  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(queue);
 
   iree_hal_hip_nccl_channel_t* channel =
       iree_hal_hip_nccl_channel_cast(entry->channel);
@@ -356,7 +357,8 @@ static iree_status_t iree_hal_hip_nccl_submit_batch_entry(
       IREE_NCCL_RETURN_IF_ERROR(
           symbols,
           ncclAllGather((const void*)sendbuff, (void*)recvbuff,
-                        entry->element_count, datatype, comm, stream),
+                        entry->element_count, datatype, comm,
+                        iree_hal_hip_queue_get_stream(queue, 0)),
           "ncclAllGather");
       break;
     }
@@ -381,7 +383,8 @@ static iree_status_t iree_hal_hip_nccl_submit_batch_entry(
       IREE_NCCL_RETURN_IF_ERROR(
           symbols,
           ncclAllReduce((const void*)sendbuff, (void*)recvbuff,
-                        entry->element_count, datatype, redop, comm, stream),
+                        entry->element_count, datatype, redop, comm,
+                        iree_hal_hip_queue_get_stream(queue, 0)),
           "ncclAllReduce");
       break;
     }
@@ -409,12 +412,13 @@ static iree_status_t iree_hal_hip_nccl_submit_batch_entry(
         IREE_NCCL_RETURN_IF_ERROR(
             symbols,
             ncclSend((const void*)(sendbuff + r * rank_offset), send_count,
-                     datatype, r, comm, stream),
+                     datatype, r, comm,
+                     iree_hal_hip_queue_get_stream(queue, 0)),
             "ncclSend");
         IREE_NCCL_RETURN_IF_ERROR(
             symbols,
             ncclRecv((void*)(recvbuff + r * rank_offset), send_count, datatype,
-                     r, comm, stream),
+                     r, comm, iree_hal_hip_queue_get_stream(queue, 0)),
             "ncclRecv");
       }
       break;
@@ -438,7 +442,7 @@ static iree_status_t iree_hal_hip_nccl_submit_batch_entry(
           symbols,
           ncclBroadcast((const void*)sendbuff, (void*)recvbuff,
                         entry->element_count, datatype, entry->param, comm,
-                        stream),
+                        iree_hal_hip_queue_get_stream(queue, 0)),
           "ncclBroadcast");
       break;
     }
@@ -464,7 +468,7 @@ static iree_status_t iree_hal_hip_nccl_submit_batch_entry(
           symbols,
           ncclReduce((const void*)sendbuff, (void*)recvbuff,
                      entry->element_count, datatype, redop, entry->param, comm,
-                     stream),
+                     iree_hal_hip_queue_get_stream(queue, 0)),
           "ncclReduce");
       break;
     }
@@ -490,7 +494,7 @@ static iree_status_t iree_hal_hip_nccl_submit_batch_entry(
           symbols,
           ncclReduceScatter((const void*)sendbuff, (void*)recvbuff,
                             entry->element_count, datatype, redop, comm,
-                            stream),
+                            iree_hal_hip_queue_get_stream(queue, 0)),
           "ncclReduceScatter");
       break;
     }
@@ -505,7 +509,7 @@ static iree_status_t iree_hal_hip_nccl_submit_batch_entry(
       IREE_NCCL_RETURN_IF_ERROR(
           symbols,
           ncclSend((const void*)sendbuff, entry->element_count, datatype,
-                   entry->param, comm, stream),
+                   entry->param, comm, iree_hal_hip_queue_get_stream(queue, 0)),
           "ncclSend");
       break;
     }
@@ -517,10 +521,11 @@ static iree_status_t iree_hal_hip_nccl_submit_batch_entry(
                       entry->recv_binding.buffer))) +
           iree_hal_buffer_byte_offset(entry->recv_binding.buffer) +
           entry->recv_binding.offset;
-      IREE_NCCL_RETURN_IF_ERROR(symbols,
-                                ncclRecv((void*)recvbuff, entry->element_count,
-                                         datatype, entry->param, comm, stream),
-                                "ncclRecv");
+      IREE_NCCL_RETURN_IF_ERROR(
+          symbols,
+          ncclRecv((void*)recvbuff, entry->element_count, datatype,
+                   entry->param, comm, iree_hal_hip_queue_get_stream(queue, 0)),
+          "ncclRecv");
       break;
     }
     case IREE_HAL_COLLECTIVE_KIND_SEND_RECV: {
@@ -546,14 +551,14 @@ static iree_status_t iree_hal_hip_nccl_submit_batch_entry(
         IREE_NCCL_RETURN_IF_ERROR(
             symbols,
             ncclSend((const void*)sendbuff, entry->element_count, datatype,
-                     sendid, comm, stream),
+                     sendid, comm, iree_hal_hip_queue_get_stream(queue, 0)),
             "ncclSend");
       }
       if (recvid != -1) {
         IREE_NCCL_RETURN_IF_ERROR(
             symbols,
             ncclRecv((void*)recvbuff, entry->element_count, datatype, recvid,
-                     comm, stream),
+                     comm, iree_hal_hip_queue_get_stream(queue, 0)),
             "ncclRecv");
       } else {
         // Zero out recvbuff if this rank is not receiving any data.
@@ -564,7 +569,7 @@ static iree_status_t iree_hal_hip_nccl_submit_batch_entry(
             channel->hip_symbols,
             hipMemsetD8Async(
                 iree_hal_hip_device_size_to_hip_device_prt(recvbuff), 0,
-                num_bytes, stream),
+                num_bytes, iree_hal_hip_queue_get_stream(queue, 0)),
             "hipMemsetD8Async");
       }
       break;
@@ -577,10 +582,10 @@ iree_status_t iree_hal_hip_nccl_submit_batch(
     const iree_hal_hip_nccl_dynamic_symbols_t* symbols,
     iree_hal_hip_tracing_context_t* tracing_context,
     iree_hal_hip_tracing_context_event_list_t* tracing_event_list,
-    const iree_hal_collective_batch_t* batch, hipStream_t stream) {
+    const iree_hal_collective_batch_t* batch, iree_hal_hip_queue_t* queue) {
   IREE_ASSERT_ARGUMENT(symbols);
   IREE_ASSERT_ARGUMENT(batch);
-  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(queue);
 
 #if IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_INSTRUMENTATION_DEVICE
   // Begin one zone for each entry in the batch. Each entry will show stacked on
@@ -593,7 +598,7 @@ iree_status_t iree_hal_hip_nccl_submit_batch(
     iree_string_view_t collective_str =
         iree_hal_collective_op_format(&entry->op, &string_temp);
     IREE_HIP_STREAM_TRACE_ZONE_BEGIN_EXTERNAL(
-        tracing_context, tracing_event_list, stream, __FILE__, strlen(__FILE__),
+        tracing_context, tracing_event_list, queue, __FILE__, strlen(__FILE__),
         (uint32_t)__LINE__, __FUNCTION__, strlen(__FUNCTION__),
         collective_str.data, collective_str.size);
   }
@@ -604,7 +609,7 @@ iree_status_t iree_hal_hip_nccl_submit_batch(
   IREE_NCCL_RETURN_IF_ERROR(symbols, ncclGroupStart(), "ncclGroupStart");
   for (iree_host_size_t i = 0; i < batch->count; ++i) {
     IREE_RETURN_IF_ERROR(
-        iree_hal_hip_nccl_submit_batch_entry(&batch->entries[i], stream));
+        iree_hal_hip_nccl_submit_batch_entry(&batch->entries[i], queue));
   }
   IREE_NCCL_RETURN_IF_ERROR(symbols, ncclGroupEnd(), "ncclGroupEnd");
 
@@ -613,7 +618,7 @@ iree_status_t iree_hal_hip_nccl_submit_batch(
   IREE_TRACE({
     for (iree_host_size_t i = 0; i < batch->count; ++i) {
       IREE_HIP_STREAM_TRACE_ZONE_END(tracing_context, tracing_event_list,
-                                     stream);
+                                     queue);
     }
   });
 

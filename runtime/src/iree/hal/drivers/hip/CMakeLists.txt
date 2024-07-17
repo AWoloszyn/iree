@@ -34,6 +34,8 @@ iree_cc_library(
     "hip_device.c"
     "hip_device.h"
     "hip_driver.c"
+    "hip_queue.h"
+    "hip_queue.c"
     "memory_pools.c"
     "memory_pools.h"
     "native_executable.c"

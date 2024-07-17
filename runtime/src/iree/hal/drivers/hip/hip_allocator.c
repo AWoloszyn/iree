@@ -12,6 +12,7 @@
 #include "iree/base/tracing.h"
 #include "iree/hal/drivers/hip/dynamic_symbols.h"
 #include "iree/hal/drivers/hip/hip_buffer.h"
+#include "iree/hal/drivers/hip/hip_queue.h"
 #include "iree/hal/drivers/hip/status_util.h"
 
 #if IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_ALLOCATION_TRACKING
@@ -27,7 +28,7 @@ typedef struct iree_hal_hip_allocator_t {
   hipDevice_t device;
 
   // The HIP stream that allocations should be used in.
-  hipStream_t stream;
+  iree_hal_hip_queue_t* queue;
 
   // NOTE: optional depending on device support.
   iree_hal_hip_memory_pools_t* pools;
@@ -54,7 +55,7 @@ static iree_hal_hip_allocator_t* iree_hal_hip_allocator_cast(
 
 iree_status_t iree_hal_hip_allocator_create(
     const iree_hal_hip_dynamic_symbols_t* hip_symbols, hipDevice_t device,
-    hipStream_t stream, iree_hal_hip_memory_pools_t* pools,
+    iree_hal_hip_queue_t* queue, iree_hal_hip_memory_pools_t* pools,
     iree_allocator_t host_allocator, iree_hal_allocator_t** out_allocator) {
   IREE_ASSERT_ARGUMENT(hip_symbols);
   IREE_ASSERT_ARGUMENT(out_allocator);
@@ -88,7 +89,7 @@ iree_status_t iree_hal_hip_allocator_create(
   iree_hal_resource_initialize(&iree_hal_hip_allocator_vtable,
                                &allocator->resource);
   allocator->device = device;
-  allocator->stream = stream;
+  allocator->queue = queue;
   allocator->pools = pools;
   allocator->symbols = hip_symbols;
   allocator->host_allocator = host_allocator;
@@ -364,8 +365,9 @@ static iree_status_t iree_hal_hip_allocator_allocate_buffer(
         // Prefetch the buffer on the GPU device.
         status = IREE_HIP_RESULT_TO_STATUS(
             allocator->symbols,
-            hipMemPrefetchAsync(device_ptr, allocation_size, allocator->device,
-                                allocator->stream));
+            hipMemPrefetchAsync(
+                device_ptr, allocation_size, allocator->device,
+                iree_hal_hip_queue_get_stream(allocator->queue, 0)));
       }
       host_ptr = (void*)device_ptr;
     } else {

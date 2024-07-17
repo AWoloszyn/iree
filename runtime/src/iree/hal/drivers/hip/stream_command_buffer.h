@@ -10,7 +10,9 @@
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/hip/dynamic_symbols.h"
+#include "iree/hal/drivers/hip/event_pool.h"
 #include "iree/hal/drivers/hip/hip_headers.h"
+#include "iree/hal/drivers/hip/hip_queue.h"
 #include "iree/hal/drivers/hip/rccl_dynamic_symbols.h"
 #include "iree/hal/drivers/hip/tracing.h"
 
@@ -36,8 +38,9 @@ iree_status_t iree_hal_hip_stream_command_buffer_create(
     iree_hal_hip_tracing_context_t* tracing_context,
     iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_host_size_t binding_capacity, hipStream_t stream,
+    iree_host_size_t binding_capacity, iree_hal_hip_queue_t* queue,
     iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
+    iree_hal_hip_event_pool_t* event_pool,
     iree_hal_command_buffer_t** out_command_buffer);
 
 // Returns true if |command_buffer| is a HIP stream-based command buffer.

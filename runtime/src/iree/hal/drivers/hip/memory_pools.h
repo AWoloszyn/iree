@@ -13,6 +13,7 @@
 #include "iree/hal/drivers/hip/api.h"
 #include "iree/hal/drivers/hip/dynamic_symbols.h"
 #include "iree/hal/drivers/hip/hip_headers.h"
+#include "iree/hal/drivers/hip/hip_queue.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,7 +67,7 @@ iree_status_t iree_hal_hip_memory_pools_trim(
 // Asynchronously allocates a buffer from an appropriate pool.
 // The allocation will be stream-ordered on |stream|.
 iree_status_t iree_hal_hip_memory_pools_allocate(
-    iree_hal_hip_memory_pools_t* pools, hipStream_t stream,
+    iree_hal_hip_memory_pools_t* pools, iree_hal_hip_queue_t* queue,
     iree_hal_allocator_pool_t pool, iree_hal_buffer_params_t params,
     iree_device_size_t allocation_size,
     iree_hal_buffer_t** IREE_RESTRICT out_buffer);
@@ -74,7 +75,7 @@ iree_status_t iree_hal_hip_memory_pools_allocate(
 // Asynchronously deallocates a buffer from its pool.
 // The deallocation will be stream-ordered on |stream|.
 iree_status_t iree_hal_hip_memory_pools_deallocate(
-    iree_hal_hip_memory_pools_t* pools, hipStream_t stream,
+    iree_hal_hip_memory_pools_t* pools, iree_hal_hip_queue_t* queue,
     iree_hal_buffer_t* buffer);
 
 #ifdef __cplusplus

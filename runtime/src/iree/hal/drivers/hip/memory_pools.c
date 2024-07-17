@@ -209,7 +209,7 @@ static void iree_hal_hip_async_buffer_release_callback(
 }
 
 iree_status_t iree_hal_hip_memory_pools_allocate(
-    iree_hal_hip_memory_pools_t* pools, hipStream_t stream,
+    iree_hal_hip_memory_pools_t* pools, iree_hal_hip_queue_t* queue,
     iree_hal_allocator_pool_t pool, iree_hal_buffer_params_t params,
     iree_device_size_t allocation_size,
     iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
@@ -232,7 +232,7 @@ iree_status_t iree_hal_hip_memory_pools_allocate(
   iree_status_t status = IREE_HIP_RESULT_TO_STATUS(
       pools->hip_symbols,
       hipMallocFromPoolAsync(&device_ptr, (size_t)allocation_size, memory_pool,
-                             stream),
+                             iree_hal_hip_queue_get_stream(queue, 0)),
       "hipMallocFromPoolAsync");
 
   // Wrap the allocated HIP buffer in a HAL buffer.
@@ -260,7 +260,9 @@ iree_status_t iree_hal_hip_memory_pools_allocate(
   } else if (buffer) {
     iree_hal_buffer_release(buffer);
   } else {
-    IREE_HIP_IGNORE_ERROR(pools->hip_symbols, hipFreeAsync(device_ptr, stream));
+    IREE_HIP_IGNORE_ERROR(
+        pools->hip_symbols,
+        hipFreeAsync(device_ptr, iree_hal_hip_queue_get_stream(queue, 0)));
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -268,7 +270,7 @@ iree_status_t iree_hal_hip_memory_pools_allocate(
 }
 
 iree_status_t iree_hal_hip_memory_pools_deallocate(
-    iree_hal_hip_memory_pools_t* pools, hipStream_t stream,
+    iree_hal_hip_memory_pools_t* pools, iree_hal_hip_queue_t* queue,
     iree_hal_buffer_t* buffer) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(
@@ -283,7 +285,9 @@ iree_status_t iree_hal_hip_memory_pools_deallocate(
     // Try to schedule the buffer for freeing.
     hipDeviceptr_t device_ptr = iree_hal_hip_buffer_device_pointer(buffer);
     status = IREE_HIP_RESULT_TO_STATUS(
-        pools->hip_symbols, hipFreeAsync(device_ptr, stream), "hipFreeAsync");
+        pools->hip_symbols,
+        hipFreeAsync(device_ptr, iree_hal_hip_queue_get_stream(queue, 0)),
+        "hipFreeAsync");
     if (iree_status_is_ok(status)) {
       // Drop the release callback so that we don't try to double-free the
       // buffer. Note that we only do this if the HIP free succeeded as

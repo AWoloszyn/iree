@@ -50,7 +50,7 @@ iree_status_t iree_hal_hip_nccl_submit_batch(
     const iree_hal_hip_nccl_dynamic_symbols_t* nccl_symbols,
     iree_hal_hip_tracing_context_t* tracing_context,
     iree_hal_hip_tracing_context_event_list_t* tracing_event_list,
-    const iree_hal_collective_batch_t* batch, hipStream_t stream);
+    const iree_hal_collective_batch_t* batch, iree_hal_hip_queue_t* queue);
 
 #ifdef __cplusplus
 }  // extern "C"

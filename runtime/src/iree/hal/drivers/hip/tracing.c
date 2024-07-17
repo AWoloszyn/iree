@@ -9,6 +9,7 @@
 #if IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_INSTRUMENTATION_DEVICE
 
 #include "iree/hal/drivers/hip/dynamic_symbols.h"
+#include "iree/hal/drivers/hip/hip_queue.h"
 #include "iree/hal/drivers/hip/status_util.h"
 
 // Total number of events per tracing context. This translates to the maximum
@@ -47,7 +48,7 @@ struct iree_hal_hip_tracing_context_t {
   const iree_hal_hip_dynamic_symbols_t* symbols;
   iree_slim_mutex_t event_mutex;
 
-  hipStream_t stream;
+  iree_hal_hip_queue_t* queue;
   iree_arena_block_pool_t* block_pool;
   iree_allocator_t host_allocator;
 
@@ -89,7 +90,7 @@ struct iree_hal_hip_tracing_context_t {
 };
 
 static iree_status_t iree_hal_hip_tracing_context_initial_calibration(
-    const iree_hal_hip_dynamic_symbols_t* symbols, hipStream_t stream,
+    const iree_hal_hip_dynamic_symbols_t* symbols, iree_hal_hip_queue_t* queue,
     hipEvent_t base_event, int64_t* out_cpu_timestamp,
     int64_t* out_gpu_timestamp, float* out_timestamp_period) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -100,8 +101,9 @@ static iree_status_t iree_hal_hip_tracing_context_initial_calibration(
   // Record event to the stream; in the absence of a synchronize this may not
   // flush immediately.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      IREE_HIP_RESULT_TO_STATUS(symbols, hipEventRecord(base_event, stream)));
+      z0, IREE_HIP_RESULT_TO_STATUS(
+              symbols, hipEventRecord(base_event, iree_hal_hip_queue_get_stream(
+                                                      queue, 0))));
 
   // Force flush the event and wait for it to complete.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -118,12 +120,12 @@ static iree_status_t iree_hal_hip_tracing_context_initial_calibration(
 
 iree_status_t iree_hal_hip_tracing_context_allocate(
     const iree_hal_hip_dynamic_symbols_t* symbols,
-    iree_string_view_t queue_name, hipStream_t stream,
+    iree_string_view_t queue_name, iree_hal_hip_queue_t* queue,
     iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
     iree_hal_hip_tracing_context_t** out_context) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_ASSERT_ARGUMENT(symbols);
-  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(queue);
   IREE_ASSERT_ARGUMENT(block_pool);
   IREE_ASSERT_ARGUMENT(out_context);
   *out_context = NULL;
@@ -133,7 +135,7 @@ iree_status_t iree_hal_hip_tracing_context_allocate(
       iree_allocator_malloc(host_allocator, sizeof(*context), (void**)&context);
   if (iree_status_is_ok(status)) {
     context->symbols = symbols;
-    context->stream = stream;
+    context->queue = queue;
     context->block_pool = block_pool;
     context->host_allocator = host_allocator;
     context->query_capacity = IREE_ARRAYSIZE(context->event_pool);
@@ -179,7 +181,7 @@ iree_status_t iree_hal_hip_tracing_context_allocate(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_hip_tracing_context_initial_calibration(
-        symbols, stream, context->base_event, &cpu_timestamp, &gpu_timestamp,
+        symbols, queue, context->base_event, &cpu_timestamp, &gpu_timestamp,
         &timestamp_period);
   }
 
@@ -364,7 +366,8 @@ static void iree_hal_hip_tracing_context_event_list_append_event(
 // event.
 static uint16_t iree_hal_hip_stream_tracing_context_insert_query(
     iree_hal_hip_tracing_context_t* context,
-    iree_hal_hip_tracing_context_event_list_t* event_list, hipStream_t stream) {
+    iree_hal_hip_tracing_context_event_list_t* event_list,
+    iree_hal_hip_queue_t* queue) {
   iree_slim_mutex_lock(&context->event_mutex);
   IREE_ASSERT_ARGUMENT(event_list);
 
@@ -377,7 +380,9 @@ static uint16_t iree_hal_hip_stream_tracing_context_insert_query(
   IREE_ASSERT(event->next_in_command_buffer != NULL);
   event->next_in_command_buffer = NULL;
 
-  IREE_HIP_IGNORE_ERROR(context->symbols, hipEventRecord(event->event, stream));
+  IREE_HIP_IGNORE_ERROR(
+      context->symbols,
+      hipEventRecord(event->event, iree_hal_hip_queue_get_stream(queue, 0)));
 
   iree_hal_hip_tracing_context_event_list_append_event(event_list, event);
 
@@ -424,23 +429,23 @@ static uint16_t iree_hal_hip_graph_tracing_context_insert_query(
 // using the differences between them.
 void iree_hal_hip_stream_tracing_zone_begin_impl(
     iree_hal_hip_tracing_context_t* context,
-    iree_hal_hip_tracing_context_event_list_t* event_list, hipStream_t stream,
-    const iree_tracing_location_t* src_loc) {
+    iree_hal_hip_tracing_context_event_list_t* event_list,
+    iree_hal_hip_queue_t* queue, const iree_tracing_location_t* src_loc) {
   IREE_ASSERT_ARGUMENT(context);
   uint16_t query_id = iree_hal_hip_stream_tracing_context_insert_query(
-      context, event_list, stream);
+      context, event_list, queue);
   iree_tracing_gpu_zone_begin(context->id, query_id, src_loc);
 }
 
 void iree_hal_hip_stream_tracing_zone_begin_external_impl(
     iree_hal_hip_tracing_context_t* context,
-    iree_hal_hip_tracing_context_event_list_t* event_list, hipStream_t stream,
-    const char* file_name, size_t file_name_length, uint32_t line,
-    const char* function_name, size_t function_name_length, const char* name,
-    size_t name_length) {
+    iree_hal_hip_tracing_context_event_list_t* event_list,
+    iree_hal_hip_queue_t* queue, const char* file_name, size_t file_name_length,
+    uint32_t line, const char* function_name, size_t function_name_length,
+    const char* name, size_t name_length) {
   IREE_ASSERT_ARGUMENT(context);
   uint16_t query_id = iree_hal_hip_stream_tracing_context_insert_query(
-      context, event_list, stream);
+      context, event_list, queue);
   iree_tracing_gpu_zone_begin_external(context->id, query_id, file_name,
                                        file_name_length, line, function_name,
                                        function_name_length, name, name_length);
@@ -465,10 +470,11 @@ void iree_hal_hip_graph_tracing_zone_begin_external_impl(
 
 void iree_hal_hip_stream_tracing_zone_end_impl(
     iree_hal_hip_tracing_context_t* context,
-    iree_hal_hip_tracing_context_event_list_t* event_list, hipStream_t stream) {
+    iree_hal_hip_tracing_context_event_list_t* event_list,
+    iree_hal_hip_queue_t* queue) {
   if (!context) return;
   uint16_t query_id = iree_hal_hip_stream_tracing_context_insert_query(
-      context, event_list, stream);
+      context, event_list, queue);
   iree_tracing_gpu_zone_end(context->id, query_id);
 }
 
@@ -488,7 +494,7 @@ void iree_hal_hip_graph_tracing_zone_end_impl(
 
 iree_status_t iree_hal_hip_tracing_context_allocate(
     const iree_hal_hip_dynamic_symbols_t* symbols,
-    iree_string_view_t queue_name, hipStream_t stream,
+    iree_string_view_t queue_name, iree_hal_hip_queue_t* queue,
     iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
     iree_hal_hip_tracing_context_t** out_context) {
   *out_context = NULL;

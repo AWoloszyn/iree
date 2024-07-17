@@ -11,6 +11,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/hip/dynamic_symbols.h"
+#include "iree/hal/drivers/hip/hip_queue.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -58,7 +59,7 @@ typedef void(IREE_API_PTR* iree_hal_hip_pending_action_cleanup_callback_t)(
 // |cleanup_callback|, if not NULL, will run after the action completes but
 // before releasing all retained resources.
 iree_status_t iree_hal_hip_pending_queue_actions_enqueue_execution(
-    iree_hal_device_t* device, hipStream_t dispatch_stream,
+    iree_hal_device_t* device, iree_hal_hip_queue_t* queue,
     iree_hal_hip_pending_queue_actions_t* actions,
     iree_hal_hip_pending_action_cleanup_callback_t cleanup_callback,
     void* callback_user_data,

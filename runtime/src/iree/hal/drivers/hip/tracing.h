@@ -13,6 +13,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/hip/dynamic_symbols.h"
 #include "iree/hal/drivers/hip/hip_headers.h"
+#include "iree/hal/drivers/hip/hip_queue.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,7 +57,7 @@ typedef struct iree_hal_hip_tracing_context_event_list_t {
 // Each context must only be used with the stream it was created for.
 iree_status_t iree_hal_hip_tracing_context_allocate(
     const iree_hal_hip_dynamic_symbols_t* symbols,
-    iree_string_view_t queue_name, hipStream_t stream,
+    iree_string_view_t queue_name, iree_hal_hip_queue_t* queue,
     iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
     iree_hal_hip_tracing_context_t** out_context);
 
@@ -86,17 +87,17 @@ void iree_hal_hip_tracing_free(
 // Must be perfectly nested and paired with a corresponding zone end.
 void iree_hal_hip_stream_tracing_zone_begin_impl(
     iree_hal_hip_tracing_context_t* context,
-    iree_hal_hip_tracing_context_event_list_t* event_list, hipStream_t stream,
-    const iree_tracing_location_t* src_loc);
+    iree_hal_hip_tracing_context_event_list_t* event_list,
+    iree_hal_hip_queue_t* queue, const iree_tracing_location_t* src_loc);
 
 // Begins an external zone using the given source information.
 // The provided strings will be copied into the tracy buffer.
 void iree_hal_hip_stream_tracing_zone_begin_external_impl(
     iree_hal_hip_tracing_context_t* context,
-    iree_hal_hip_tracing_context_event_list_t* event_list, hipStream_t stream,
-    const char* file_name, size_t file_name_length, uint32_t line,
-    const char* function_name, size_t function_name_length, const char* name,
-    size_t name_length);
+    iree_hal_hip_tracing_context_event_list_t* event_list,
+    iree_hal_hip_queue_t* queue, const char* file_name, size_t file_name_length,
+    uint32_t line, const char* function_name, size_t function_name_length,
+    const char* name, size_t name_length);
 
 void iree_hal_hip_graph_tracing_zone_begin_external_impl(
     iree_hal_hip_tracing_context_t* context,
@@ -109,7 +110,8 @@ void iree_hal_hip_graph_tracing_zone_begin_external_impl(
 
 void iree_hal_hip_stream_tracing_zone_end_impl(
     iree_hal_hip_tracing_context_t* context,
-    iree_hal_hip_tracing_context_event_list_t* event_list, hipStream_t stream);
+    iree_hal_hip_tracing_context_event_list_t* event_list,
+    iree_hal_hip_queue_t* queue);
 void iree_hal_hip_graph_tracing_zone_end_impl(
     iree_hal_hip_tracing_context_t* context,
     iree_hal_hip_tracing_context_event_list_t* event_list,

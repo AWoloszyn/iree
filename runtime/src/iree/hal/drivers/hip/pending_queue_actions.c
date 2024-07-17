@@ -85,7 +85,7 @@ typedef struct iree_hal_hip_queue_action_t {
   iree_hal_device_t* device;
 
   // The stream to launch main GPU workload.
-  hipStream_t dispatch_hip_stream;
+  iree_hal_hip_queue_t* queue;
 
   // Resource set to retain all associated resources by the payload.
   iree_hal_resource_set_t* resource_set;
@@ -638,7 +638,7 @@ static void iree_hal_hip_queue_decrement_completion_count(
 }
 
 iree_status_t iree_hal_hip_pending_queue_actions_enqueue_execution(
-    iree_hal_device_t* device, hipStream_t dispatch_stream,
+    iree_hal_device_t* device, iree_hal_hip_queue_t* queue,
     iree_hal_hip_pending_queue_actions_t* actions,
     iree_hal_hip_pending_action_cleanup_callback_t cleanup_callback,
     void* callback_user_data,
@@ -687,7 +687,7 @@ iree_status_t iree_hal_hip_pending_queue_actions_enqueue_execution(
   action->callback_user_data = callback_user_data;
   action->kind = IREE_HAL_HIP_QUEUE_ACTION_TYPE_EXECUTION;
   action->device = device;
-  action->dispatch_hip_stream = dispatch_stream;
+  action->queue = queue;
 
   // Initialize scratch fields.
   action->event_count = 0;
@@ -894,7 +894,7 @@ static iree_status_t iree_hal_hip_pending_queue_actions_issue_execution(
   for (iree_host_size_t i = 0; i < action->event_count; ++i) {
     IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
         z0, symbols,
-        hipStreamWaitEvent(action->dispatch_hip_stream,
+        hipStreamWaitEvent(iree_hal_hip_queue_get_stream(action->queue, 0),
                            iree_hal_hip_event_handle(action->events[i]),
                            /*flags=*/0),
         "hipStreamWaitEvent");
@@ -923,7 +923,8 @@ static iree_status_t iree_hal_hip_pending_queue_actions_issue_execution(
       hipGraphExec_t exec =
           iree_hal_hip_graph_command_buffer_handle(command_buffer);
       IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, symbols, hipGraphLaunch(exec, action->dispatch_hip_stream),
+          z0, symbols,
+          hipGraphLaunch(exec, iree_hal_hip_queue_get_stream(action->queue, 0)),
           "hipGraphLaunch");
       iree_hal_hip_graph_tracing_notify_submitted_commands(command_buffer);
     } else {
@@ -968,7 +969,8 @@ static iree_status_t iree_hal_hip_pending_queue_actions_issue_execution(
 
     // Record the event signaling in the dispatch stream.
     IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, symbols, hipEventRecord(event, action->dispatch_hip_stream),
+        z0, symbols,
+        hipEventRecord(event, iree_hal_hip_queue_get_stream(action->queue, 0)),
         "hipEventRecord");
     completion_event = event;
   }
@@ -987,7 +989,8 @@ static iree_status_t iree_hal_hip_pending_queue_actions_issue_execution(
 
   IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
       z0, symbols,
-      hipEventRecord(completion_event, action->dispatch_hip_stream),
+      hipEventRecord(completion_event,
+                     iree_hal_hip_queue_get_stream(action->queue, 0)),
       "hipEventRecord");
   iree_slim_mutex_lock(
       &action->owning_actions->working_area.pending_work_items_count_mutex);
