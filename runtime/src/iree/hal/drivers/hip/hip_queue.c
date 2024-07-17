@@ -11,9 +11,9 @@
 #define IREE_HIP_QUEUE_MAX_STREAMS 32
 
 typedef struct iree_hal_hip_queue_t {
-  hipStream_t streams[IREE_HIP_QUEUE_MAX_STREAMS];
   const iree_hal_hip_dynamic_symbols_t* symbols;
   iree_allocator_t host_allocator;
+  hipStream_t streams[IREE_HIP_QUEUE_MAX_STREAMS * 2];
 } iree_hal_hip_queue_t;
 
 iree_status_t iree_hal_hip_queue_create(
@@ -48,7 +48,8 @@ void iree_hal_hip_queue_destroy(iree_hal_hip_queue_t* queue) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   for (uint32_t i = 0; i < IREE_HIP_QUEUE_MAX_STREAMS; ++i) {
-    IREE_HIP_IGNORE_ERROR(queue->symbols, hipStreamDestroy(queue->streams[i]));
+    // IREE_HIP_IGNORE_ERROR(queue->symbols,
+    // hipStreamDestroy(queue->streams[i]));
   }
 
   iree_allocator_free(queue->host_allocator, queue);
