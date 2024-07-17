@@ -18,11 +18,54 @@
 
 #define USE_EVENT_POOL 0
 #define MAX_STREAMS 32
+#define MAX_BUFFERED_COMMANDS 1024
 typedef struct iree_hal_hip_sync_event_list_t iree_hal_hip_sync_event_list_t;
 typedef struct iree_hal_hip_sync_event_list_t {
   iree_hal_hip_sync_event_list_t* next;
   iree_hal_hip_event_t* event;
 } iree_hal_hip_sync_event_list_t;
+typedef struct dispatch {
+  hipFunction_t f;
+  unsigned int gridDimX;
+  unsigned int gridDimY;
+  unsigned int gridDimZ;
+  unsigned int blockDimX;
+  unsigned int blockDimY;
+  unsigned int blockDimZ;
+  unsigned int sharedMemBytes;
+  void** kernelParams;
+} dispatch;
+typedef struct copy_buffer {
+  void* dst;
+  const void* src;
+  size_t sizeBytes;
+  hipMemcpyKind kind;
+} copy_buffer;
+typedef struct update_buffer {
+  hipDeviceptr_t dst;
+  void* src;
+  size_t sizeBytes;
+} update_buffer;
+typedef struct fill_buffer {
+  hipDeviceptr_t dst;
+  uint64_t pattern;
+  uint32_t pattern_length;
+  size_t count;
+} fill_buffer;
+
+typedef struct iree_hal_hip_stream_command_buffer_t
+    iree_hal_hip_stream_command_buffer_t;
+typedef struct command command;
+
+typedef struct command {
+  union {
+    dispatch dispatch;
+    copy_buffer copy_buffer;
+    update_buffer update_buffer;
+    fill_buffer fill_buffer;
+  };
+  iree_status_t (*apply)(iree_hal_hip_stream_command_buffer_t*, command*);
+} command;
 
 typedef struct iree_hal_hip_stream_command_buffer_t {
   iree_hal_command_buffer_t base;
@@ -62,10 +105,29 @@ typedef struct iree_hal_hip_stream_command_buffer_t {
 #else
   int32_t* event_mem;
   int32_t event_num[MAX_STREAMS];
+  command buffered_commands[1024];
+  int32_t num_buffered_commands;
 #endif
 
   int32_t current_stream;
 } iree_hal_hip_stream_command_buffer_t;
+
+static iree_status_t iree_hal_hip_stream_command_buffer_apply_buffered_commands(
+    iree_hal_hip_stream_command_buffer_t* cb) {
+  iree_status_t status = iree_ok_status();
+  for (int i = 0; i < cb->num_buffered_commands && iree_status_is_ok(status);
+       ++i) {
+    status = cb->buffered_commands[i].apply(cb, &cb->buffered_commands[i]);
+  }
+  cb->num_buffered_commands = 0;
+  return status;
+}
+
+static command* iree_hal_hip_stream_command_buffer_get_next_buffered_command(
+    iree_hal_hip_stream_command_buffer_t* cb) {
+  IREE_ASSERT(cb->num_buffered_commands < MAX_BUFFERED_COMMANDS);
+  return &cb->buffered_commands[cb->num_buffered_commands++];
+}
 
 static const iree_hal_command_buffer_vtable_t
     iree_hal_hip_stream_command_buffer_vtable;
@@ -144,8 +206,9 @@ iree_status_t iree_hal_hip_stream_command_buffer_create(
 #else
   IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
       z0, command_buffer->hip_symbols,
-      hipMalloc((void**)&command_buffer->event_mem,
-                sizeof(int32_t) * MAX_STREAMS + 1),
+      hipExtMallocWithFlags((void**)&command_buffer->event_mem,
+                            sizeof(int32_t) * MAX_STREAMS + 1,
+                            hipDeviceMallocFinegrained),
       "hipMalloc");
   memset(command_buffer->event_num, 0x00, sizeof(command_buffer->event_num));
 #endif
@@ -266,14 +329,6 @@ static iree_status_t iree_hal_hip_stream_command_buffer_begin(
           iree_hal_hip_queue_get_stream(command_buffer->hip_queue, 0)),
       "hipEventRecord");
   command_buffer->last_sync_event = event;
-#else
-  IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, command_buffer->hip_symbols,
-      hipStreamWriteValue32(
-          iree_hal_hip_queue_get_stream(command_buffer->hip_queue, 0),
-          &command_buffer->event_mem[0], ++command_buffer->event_num[0], 0),
-      "hipStreamWriteValue32");
-
 #endif
 
   IREE_TRACE_ZONE_END(z0);
@@ -308,34 +363,53 @@ static iree_status_t iree_hal_hip_stream_command_buffer_end(
         "hipStreamWaitEvent");
   }
 #else
-
-  // If we have more than one stream active, have stream0 wait on all of them
-  for (int32_t i = 1; i < command_buffer->current_stream; i++) {
+  if (IREE_LIKELY(command_buffer->num_buffered_commands <= 1)) {
+    iree_hal_hip_stream_command_buffer_apply_buffered_commands(command_buffer);
+  } else {
+    const int32_t num_buffered_commands = command_buffer->num_buffered_commands;
     IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
         z0, command_buffer->hip_symbols,
         hipStreamWriteValue32(
-            iree_hal_hip_queue_get_stream(command_buffer->hip_queue, i),
-            &command_buffer->event_mem[i + 1], ++command_buffer->event_num[i],
-            0),
+            iree_hal_hip_queue_get_stream(command_buffer->hip_queue, 0),
+            &command_buffer->event_mem[0], ++command_buffer->event_num[0], 0),
         "hipStreamWriteValue32");
-    if (i % 2 == 0) {
-      uint64_t waitval = (((uint64_t)command_buffer->event_num[i - 1]) << 32) |
-                         (command_buffer->event_num[i]);
-      IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, command_buffer->hip_symbols,
-          hipStreamWaitValue64(
-              iree_hal_hip_queue_get_stream(command_buffer->hip_queue, 0),
-              &command_buffer->event_mem[i], waitval, hipStreamWaitValueEq,
-              0xFFFFFFFFFFFFFFFF),
-          "hipStreamWaitValue64");
-    } else if (i == command_buffer->current_stream - 1) {
+    for (int32_t i = 1; i < num_buffered_commands; i++) {
       IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
           z0, command_buffer->hip_symbols,
           hipStreamWaitValue32(
-              iree_hal_hip_queue_get_stream(command_buffer->hip_queue, 0),
-              &command_buffer->event_mem[i + 1], command_buffer->event_num[i],
+              iree_hal_hip_queue_get_stream(command_buffer->hip_queue, i),
+              &command_buffer->event_mem[0], command_buffer->event_num[0],
               hipStreamWaitValueEq, 0xFFFFFFFF),
           "hipStreamWaitValue32");
+    }
+    iree_hal_hip_stream_command_buffer_apply_buffered_commands(command_buffer);
+    for (int32_t i = 1; i < num_buffered_commands; i++) {
+      IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, command_buffer->hip_symbols,
+          hipStreamWriteValue32(
+              iree_hal_hip_queue_get_stream(command_buffer->hip_queue, i),
+              &command_buffer->event_mem[i + 1], ++command_buffer->event_num[i],
+              0),
+          "hipStreamWriteValue32");
+      if (i % 2 == 0) {
+        uint64_t waitval;
+        memcpy(&waitval, command_buffer->event_num + i - 1, sizeof(uint64_t));
+        IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+            z0, command_buffer->hip_symbols,
+            hipStreamWaitValue64(
+                iree_hal_hip_queue_get_stream(command_buffer->hip_queue, 0),
+                &command_buffer->event_mem[i], waitval, hipStreamWaitValueEq,
+                0xFFFFFFFFFFFFFFFF),
+            "hipStreamWaitValue64");
+      } else if (i == command_buffer->current_stream - 1) {
+        IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+            z0, command_buffer->hip_symbols,
+            hipStreamWaitValue32(
+                iree_hal_hip_queue_get_stream(command_buffer->hip_queue, 0),
+                &command_buffer->event_mem[i + 1], command_buffer->event_num[i],
+                hipStreamWaitValueEq, 0xFFFFFFFF),
+            "hipStreamWaitValue32");
+      }
     }
   }
 #endif
@@ -458,41 +532,55 @@ static iree_status_t iree_hal_hip_stream_command_buffer_execution_barrier(
       "hipEventRecord");
   command_buffer->last_sync_event = event;
 #else
-  for (int32_t i = 1; i < command_buffer->current_stream; i++) {
+  if (IREE_LIKELY(command_buffer->num_buffered_commands <= 1)) {
+    iree_hal_hip_stream_command_buffer_apply_buffered_commands(command_buffer);
+  } else {
+    const int32_t num_buffered_commands = command_buffer->num_buffered_commands;
     IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
         z0, command_buffer->hip_symbols,
         hipStreamWriteValue32(
-            iree_hal_hip_queue_get_stream(command_buffer->hip_queue, i),
-            &command_buffer->event_mem[i + 1], ++command_buffer->event_num[i],
-            0),
+            iree_hal_hip_queue_get_stream(command_buffer->hip_queue, 0),
+            &command_buffer->event_mem[0], ++command_buffer->event_num[0], 0),
         "hipStreamWriteValue32");
-    if (i % 2 == 0) {
-      uint64_t waitval;
-      memcpy(&waitval, command_buffer->event_num + i - 1, sizeof(uint64_t));
-      IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, command_buffer->hip_symbols,
-          hipStreamWaitValue64(
-              iree_hal_hip_queue_get_stream(command_buffer->hip_queue, 0),
-              &command_buffer->event_mem[i], waitval, hipStreamWaitValueEq,
-              0xFFFFFFFFFFFFFFFF),
-          "hipStreamWaitValue64");
-    } else if (i == command_buffer->current_stream - 1) {
+    for (int32_t i = 1; i < num_buffered_commands; i++) {
       IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
           z0, command_buffer->hip_symbols,
           hipStreamWaitValue32(
-              iree_hal_hip_queue_get_stream(command_buffer->hip_queue, 0),
-              &command_buffer->event_mem[i + 1], command_buffer->event_num[i],
+              iree_hal_hip_queue_get_stream(command_buffer->hip_queue, i),
+              &command_buffer->event_mem[0], command_buffer->event_num[0],
               hipStreamWaitValueEq, 0xFFFFFFFF),
           "hipStreamWaitValue32");
     }
+    iree_hal_hip_stream_command_buffer_apply_buffered_commands(command_buffer);
+    for (int32_t i = 1; i < num_buffered_commands; i++) {
+      IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, command_buffer->hip_symbols,
+          hipStreamWriteValue32(
+              iree_hal_hip_queue_get_stream(command_buffer->hip_queue, i),
+              &command_buffer->event_mem[i + 1], ++command_buffer->event_num[i],
+              0),
+          "hipStreamWriteValue32");
+      if (i % 2 == 0) {
+        uint64_t waitval;
+        memcpy(&waitval, command_buffer->event_num + i - 1, sizeof(uint64_t));
+        IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+            z0, command_buffer->hip_symbols,
+            hipStreamWaitValue64(
+                iree_hal_hip_queue_get_stream(command_buffer->hip_queue, 0),
+                &command_buffer->event_mem[i], waitval, hipStreamWaitValueEq,
+                0xFFFFFFFFFFFFFFFF),
+            "hipStreamWaitValue64");
+      } else if (i == command_buffer->current_stream - 1) {
+        IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+            z0, command_buffer->hip_symbols,
+            hipStreamWaitValue32(
+                iree_hal_hip_queue_get_stream(command_buffer->hip_queue, 0),
+                &command_buffer->event_mem[i + 1], command_buffer->event_num[i],
+                hipStreamWaitValueEq, 0xFFFFFFFF),
+            "hipStreamWaitValue32");
+      }
+    }
   }
-
-  IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, command_buffer->hip_symbols,
-      hipStreamWriteValue32(
-          iree_hal_hip_queue_get_stream(command_buffer->hip_queue, 0),
-          &command_buffer->event_mem[0], ++command_buffer->event_num[0], 0),
-      "hipStreamWriteValue32");
 #endif
 
   command_buffer->current_stream = 0;
@@ -540,6 +628,57 @@ static iree_status_t iree_hal_hip_stream_command_buffer_discard_buffer(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_hip_stream_command_buffer_apply_deferred_fill_buffer(
+    iree_hal_hip_stream_command_buffer_t* command_buffer, command* command) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  switch (command->fill_buffer.pattern_length) {
+    case 4: {
+      IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, command_buffer->hip_symbols,
+          hipMemsetD32Async(
+              command->fill_buffer.dst,
+              *(const uint32_t*)(&command->fill_buffer.pattern),
+              command->fill_buffer.count,
+              iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
+                                            command_buffer->current_stream++)),
+          "hipMemsetD32Async");
+      break;
+    }
+    case 2: {
+      IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, command_buffer->hip_symbols,
+          hipMemsetD16Async(
+              command->fill_buffer.dst,
+              *(const uint16_t*)(&command->fill_buffer.pattern),
+              command->fill_buffer.count,
+              iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
+                                            command_buffer->current_stream++)),
+          "hipMemsetD16Async");
+      break;
+    }
+    case 1: {
+      IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, command_buffer->hip_symbols,
+          hipMemsetD8Async(
+              command->fill_buffer.dst,
+              *(const uint8_t*)(&command->fill_buffer.pattern),
+              command->fill_buffer.count,
+              iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
+                                            command_buffer->current_stream++)),
+          "hipMemsetD8Async");
+      break;
+    }
+    default:
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(IREE_STATUS_INTERNAL,
+                              "unsupported fill pattern length");
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_hip_stream_command_buffer_fill_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t target_ref, const void* pattern,
@@ -568,18 +707,6 @@ static iree_status_t iree_hal_hip_stream_command_buffer_fill_buffer(
             iree_hal_hip_event_handle(command_buffer->last_sync_event), 0),
         "hipStreamWaitEvent");
   }
-#else
-  if (IREE_UNLIKELY(command_buffer->current_stream > 0)) {
-    IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, command_buffer->hip_symbols,
-        hipStreamWaitValue32(
-            iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
-                                          command_buffer->current_stream),
-            &command_buffer->event_mem[0], command_buffer->event_num[0],
-            hipStreamWaitValueEq, 0xFFFFFFFF),
-        "hipStreamWaitValue32");
-  }
-#endif
   switch (pattern_length) {
     case 4: {
       IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
@@ -616,6 +743,35 @@ static iree_status_t iree_hal_hip_stream_command_buffer_fill_buffer(
       return iree_make_status(IREE_STATUS_INTERNAL,
                               "unsupported fill pattern length");
   }
+#else
+  if (pattern_length != 1 && pattern_length != 2 && pattern_length != 4) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "unsupported fill pattern length");
+  }
+  command* cmd = iree_hal_hip_stream_command_buffer_get_next_buffered_command(
+      command_buffer);
+  cmd->fill_buffer = (fill_buffer){dst, 0, pattern_length, num_elements};
+  memcpy(&cmd->fill_buffer.pattern, pattern, pattern_length);
+  cmd->apply = &iree_hal_hip_stream_command_buffer_apply_deferred_fill_buffer;
+#endif
+
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_hip_stream_command_buffer_apply_deferred_update_buffer(
+    iree_hal_hip_stream_command_buffer_t* command_buffer, command* command) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, command_buffer->hip_symbols,
+      hipMemcpyHtoDAsync(
+          command->update_buffer.dst, command->update_buffer.src,
+          command->update_buffer.sizeBytes,
+          iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
+                                        command_buffer->current_stream++)),
+      "hipMemcpyHtoDAsync");
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -658,24 +814,12 @@ static iree_status_t iree_hal_hip_stream_command_buffer_update_buffer(
   if (IREE_UNLIKELY(command_buffer->current_stream > 0)) {
     IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
         z0, command_buffer->hip_symbols,
-        hipStreamWaitValue32(
+        hipStreamWaitEvent(
             iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
                                           command_buffer->current_stream),
-            command_buffer->event_num[0], 1, hipStreamWaitValueEq, 0xFFFFFFFF),
-        "hipStreamWaitValue32");
+            iree_hal_hip_event_handle(command_buffer->last_sync_event), 0),
+        "hipStreamWaitEvent");
   }
-#else
-  if (IREE_UNLIKELY(command_buffer->current_stream > 0)) {
-    IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, command_buffer->hip_symbols,
-        hipStreamWaitValue32(
-            iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
-                                          command_buffer->current_stream),
-            &command_buffer->event_mem[0], command_buffer->event_num[0],
-            hipStreamWaitValueEq, 0xFFFFFFFF),
-        "hipStreamWaitValue32");
-  }
-#endif
 
   IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
       z0, command_buffer->hip_symbols,
@@ -684,6 +828,30 @@ static iree_status_t iree_hal_hip_stream_command_buffer_update_buffer(
           iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
                                         command_buffer->current_stream++)),
       "hipMemcpyHtoDAsync");
+
+#else
+  command* cmd = iree_hal_hip_stream_command_buffer_get_next_buffered_command(
+      command_buffer);
+  cmd->update_buffer = (update_buffer){dst, (void*)src, target_ref.length};
+  cmd->apply = &iree_hal_hip_stream_command_buffer_apply_deferred_update_buffer;
+#endif
+
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_hip_stream_command_buffer_apply_deferred_copy_buffer(
+    iree_hal_hip_stream_command_buffer_t* command_buffer, command* command) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, command_buffer->hip_symbols,
+      hipMemcpyAsync(
+          command->copy_buffer.dst, command->copy_buffer.src,
+          command->copy_buffer.sizeBytes, command->copy_buffer.kind,
+          iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
+                                        command_buffer->current_stream++)),
+      "hipMemcpyAsync");
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -714,24 +882,12 @@ static iree_status_t iree_hal_hip_stream_command_buffer_copy_buffer(
   if (IREE_UNLIKELY(command_buffer->current_stream > 0)) {
     IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
         z0, command_buffer->hip_symbols,
-        hipStreamWaitValue32(
+        hipStreamWaitEvent(
             iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
                                           command_buffer->current_stream),
-            command_buffer->event_num[0], 1, hipStreamWaitValueEq, 0xFFFFFFFF),
-        "hipStreamWaitValue32");
+            iree_hal_hip_event_handle(command_buffer->last_sync_event), 0),
+        "hipStreamWaitEvent");
   }
-#else
-  if (IREE_UNLIKELY(command_buffer->current_stream > 0)) {
-    IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, command_buffer->hip_symbols,
-        hipStreamWaitValue32(
-            iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
-                                          command_buffer->current_stream),
-            &command_buffer->event_mem[0], command_buffer->event_num[0],
-            hipStreamWaitValueEq, 0xFFFFFFFF),
-        "hipStreamWaitValue32");
-  }
-#endif
 
   IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
       z0, command_buffer->hip_symbols,
@@ -740,6 +896,14 @@ static iree_status_t iree_hal_hip_stream_command_buffer_copy_buffer(
           iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
                                         command_buffer->current_stream++)),
       "hipMemcpyAsync");
+
+#else
+  command* cmd = iree_hal_hip_stream_command_buffer_get_next_buffered_command(
+      command_buffer);
+  cmd->copy_buffer =
+      (copy_buffer){dst, src, target_ref.length, hipMemcpyDeviceToDevice};
+  cmd->apply = &iree_hal_hip_stream_command_buffer_apply_deferred_copy_buffer;
+#endif
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -825,6 +989,26 @@ static iree_status_t iree_hal_hip_stream_command_buffer_push_descriptor_set(
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
+}
+
+iree_status_t iree_hal_hip_stream_command_buffer_apply_deferred_dispatch(
+    iree_hal_hip_stream_command_buffer_t* command_buffer, command* command) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_status_t status = IREE_HIP_RESULT_TO_STATUS(
+      command_buffer->hip_symbols,
+      hipModuleLaunchKernel(
+          command->dispatch.f, command->dispatch.gridDimX,
+          command->dispatch.gridDimY, command->dispatch.gridDimZ,
+          command->dispatch.blockDimX, command->dispatch.blockDimY,
+          command->dispatch.blockDimZ, command->dispatch.sharedMemBytes,
+          iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
+                                        command_buffer->current_stream++),
+          command->dispatch.kernelParams, NULL),
+      "hipModuleLaunchKernel");
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 static iree_status_t iree_hal_hip_stream_command_buffer_dispatch(
@@ -921,18 +1105,6 @@ static iree_status_t iree_hal_hip_stream_command_buffer_dispatch(
             iree_hal_hip_event_handle(command_buffer->last_sync_event), 0),
         "hipStreamWaitEvent");
   }
-#else
-  if (IREE_UNLIKELY(command_buffer->current_stream > 0)) {
-    IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, command_buffer->hip_symbols,
-        hipStreamWaitValue32(
-            iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
-                                          command_buffer->current_stream),
-            &command_buffer->event_mem[0], command_buffer->event_num[0],
-            hipStreamWaitValueEq, 0xFFFFFFFF),
-        "hipStreamWaitValue32");
-  }
-#endif
 
   iree_status_t status = IREE_HIP_RESULT_TO_STATUS(
       command_buffer->hip_symbols,
@@ -945,6 +1117,21 @@ static iree_status_t iree_hal_hip_stream_command_buffer_dispatch(
           params_ptr, NULL),
       "hipModuleLaunchKernel");
 
+#else
+  iree_status_t status = iree_ok_status();
+  command* cmd = iree_hal_hip_stream_command_buffer_get_next_buffered_command(
+      command_buffer);
+  cmd->dispatch = (dispatch){kernel_info.function,
+                             workgroup_x,
+                             workgroup_y,
+                             workgroup_z,
+                             kernel_info.block_size[0],
+                             kernel_info.block_size[1],
+                             kernel_info.block_size[2],
+                             kernel_info.shared_memory_size,
+                             params_ptr};
+  cmd->apply = &iree_hal_hip_stream_command_buffer_apply_deferred_dispatch;
+#endif
   // IREE_HIP_STREAM_TRACE_ZONE_END(command_buffer->tracing_context,
   //                                &command_buffer->tracing_event_list,
   //                                command_buffer->hip_stream);
