@@ -25,6 +25,9 @@ typedef struct iree_hal_hip_descriptor_set_layout_t {
 
   // The total number of bindings in this descriptor set.
   iree_host_size_t binding_count;
+
+  // The flags on the bindings.
+  iree_hal_descriptor_flags_t* flags;
 } iree_hal_hip_descriptor_set_layout_t;
 
 static const iree_hal_descriptor_set_layout_vtable_t
@@ -65,6 +68,18 @@ iree_status_t iree_hal_hip_descriptor_set_layout_create(
                                &descriptor_set_layout->resource);
   descriptor_set_layout->host_allocator = host_allocator;
   descriptor_set_layout->binding_count = binding_count;
+
+  iree_status_t status = iree_allocator_malloc(
+      host_allocator, sizeof(iree_hal_descriptor_flags_t) * binding_count,
+      (void**)&descriptor_set_layout->flags);
+  if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
+    iree_allocator_free(host_allocator, descriptor_set_layout);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+  for (iree_host_size_t i = 0; i < binding_count; ++i) {
+    descriptor_set_layout->flags[i] = bindings[i].flags;
+  }
   *out_descriptor_set_layout =
       (iree_hal_descriptor_set_layout_t*)descriptor_set_layout;
 
@@ -79,6 +94,13 @@ iree_host_size_t iree_hal_hip_descriptor_set_layout_binding_count(
   return descriptor_set_layout->binding_count;
 }
 
+iree_hal_descriptor_flags_t* iree_hal_hip_descriptor_set_layout_binding_flags(
+    const iree_hal_descriptor_set_layout_t* base_descriptor_set_layout) {
+  const iree_hal_hip_descriptor_set_layout_t* descriptor_set_layout =
+      iree_hal_hip_descriptor_set_layout_const_cast(base_descriptor_set_layout);
+  return descriptor_set_layout->flags;
+}
+
 static void iree_hal_hip_descriptor_set_layout_destroy(
     iree_hal_descriptor_set_layout_t* base_descriptor_set_layout) {
   iree_hal_hip_descriptor_set_layout_t* descriptor_set_layout =
@@ -86,6 +108,7 @@ static void iree_hal_hip_descriptor_set_layout_destroy(
   iree_allocator_t host_allocator = descriptor_set_layout->host_allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_allocator_free(host_allocator, descriptor_set_layout->flags);
   iree_allocator_free(host_allocator, descriptor_set_layout);
 
   IREE_TRACE_ZONE_END(z0);

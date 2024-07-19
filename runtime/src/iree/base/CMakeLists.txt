@@ -15,12 +15,20 @@ iree_cc_library(
     "allocator.c"
     "allocator.h"
     "assert.h"
+    "circular_array.h"
+    "circular_array.c"
     "bitfield.c"
     "bitfield.h"
+    "hash_map.h"
+    "hash_map.c"
+    "interval_list.h"
+    "interval_list.c"
     "loop.c"
     "loop.h"
     "loop_inline.c"
     "loop_inline.h"
+    "rbt.h"
+    "rbt.c"
     "status.c"
     "status.h"
     "status_cc.h"
@@ -145,6 +153,17 @@ iree_cc_test(
     ::base
     ::loop_sync
     ::loop_test_hdrs
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    awoloszy_data_structures_test
+  SRCS
+    "awoloszy_data_structures_test.cc"
+  DEPS
+    ::base
     iree::testing::gtest
     iree::testing::gtest_main
 )

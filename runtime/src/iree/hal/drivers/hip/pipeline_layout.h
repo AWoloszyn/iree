@@ -46,6 +46,9 @@ iree_status_t iree_hal_hip_descriptor_set_layout_create(
 iree_host_size_t iree_hal_hip_descriptor_set_layout_binding_count(
     const iree_hal_descriptor_set_layout_t* descriptor_set_layout);
 
+iree_hal_descriptor_flags_t* iree_hal_hip_descriptor_set_layout_binding_flags(
+    const iree_hal_descriptor_set_layout_t* base_descriptor_set_layout);
+
 //===----------------------------------------------------------------------===//
 // iree_hal_hip_pipeline_layout_t
 //===----------------------------------------------------------------------===//

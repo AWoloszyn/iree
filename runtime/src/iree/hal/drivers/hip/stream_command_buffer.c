@@ -4,8 +4,11 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#define POOL_TYPE 2
 
 #include "iree/hal/drivers/hip/stream_command_buffer.h"
+
+#include <stdbool.h>
 
 #include "iree/hal/drivers/hip/hip_buffer.h"
 #include "iree/hal/drivers/hip/native_executable.h"
@@ -16,9 +19,20 @@
 #include "iree/hal/utils/collective_batch.h"
 #include "iree/hal/utils/resource_set.h"
 
-#define USE_EVENT_POOL 0
+#if POOL_TYPE == 2
+#include "iree/base/circular_array.h"
+#include "iree/base/hash_map.h"
+#include "iree/base/interval_list.h"
+#endif
+
+#ifndef MIN
+#define MIN(a, b) (a < b ? a : b)
+#endif
+
 #define MAX_STREAMS 32
+#define MAX_GRAPH_HEADS 16
 #define MAX_BUFFERED_COMMANDS 1024
+#if POOL_TYPE == 1 || POOL_TYPE == 2
 typedef struct iree_hal_hip_sync_event_list_t iree_hal_hip_sync_event_list_t;
 typedef struct iree_hal_hip_sync_event_list_t {
   iree_hal_hip_sync_event_list_t* next;
@@ -64,8 +78,102 @@ typedef struct command {
     update_buffer update_buffer;
     fill_buffer fill_buffer;
   };
-  iree_status_t (*apply)(iree_hal_hip_stream_command_buffer_t*, command*);
+  const char* debug_label;
+  iree_status_t (*apply)(iree_hal_hip_stream_command_buffer_t*, command*,
+                         uint32_t);
 } command;
+#endif
+
+#if POOL_TYPE == 2
+typedef struct iree_hal_hip_graph_node_t {
+  command* command;
+  iree_hash_map_t* children;
+  iree_hash_map_t* parents;
+  // To save some effort, scheduled_stream is going to be
+  // ~actually_scheduled_stream. This way we can simply
+  // check if its not null to see if its been scheduled.
+  uint32_t scheduled_stream;
+  // Track this here to save us time later.
+  uint32_t num_parents_scheduled;
+} iree_hal_hip_graph_node_t;
+
+bool insert_nodes_into_circular_array(iree_hash_map_element_t* element,
+                                      void* user_data) {
+  iree_circular_array_t* array = (iree_circular_array_t*)(user_data);
+  iree_hal_hip_graph_node_t* parent_node =
+      (iree_hal_hip_graph_node_t*)iree_hash_map_element_get_key(element);
+
+  iree_hal_hip_graph_node_t** out_item;
+  IREE_ASSERT(iree_ok_status() ==
+              iree_circular_array_push_back(array, (void**)&out_item));
+  out_item[0] = parent_node;
+  parent_node->num_parents_scheduled++;
+  return true;
+}
+
+typedef struct pc {
+  iree_hal_hip_graph_node_t* parent_node;
+  iree_circular_array_t* array;
+} pc;
+
+bool print_children(iree_hash_map_element_t* element, void* user_data) {
+  iree_hal_hip_graph_node_t* child_node =
+      (iree_hal_hip_graph_node_t*)iree_hash_map_element_get_key(element);
+  iree_hal_hip_graph_node_t* parent_node = ((pc*)user_data)->parent_node;
+  fprintf(stderr, "\"%p\" -> \"%p\"\n", parent_node, child_node);
+  iree_hal_hip_graph_node_t** out_item;
+  IREE_ASSERT(iree_ok_status() ==
+              iree_circular_array_push_back(((pc*)user_data)->array,
+                                            (void**)&out_item));
+  out_item[0] = child_node;
+  return true;
+}
+
+void iree_hal_hip_graph_buffer_print(iree_allocator_t allocator,
+                                     iree_hal_hip_graph_node_t** heads,
+                                     iree_host_size_t num_heads) {
+  iree_hash_map_t* inserted;
+  iree_hash_map_create(allocator, 0, 4096, &inserted);
+
+  iree_circular_array_t* array;
+  iree_circular_array_create(allocator, 1024,
+                             sizeof(iree_hal_hip_graph_node_t*), &array);
+
+  for (size_t i = 0; i < num_heads; ++i) {
+    iree_hal_hip_graph_node_t** node;
+    iree_circular_array_push_back(array, (void**)&node);
+    *node = heads[i];
+  }
+  fprintf(stderr, "digraph G {\n");
+
+  while (iree_circular_array_size(array)) {
+    iree_hal_hip_graph_node_t** node;
+    iree_circular_array_front(array, (void**)&node);
+    if (iree_hash_map_find(inserted, (uint64_t)node[0])) {
+      iree_circular_array_pop_front(array);
+      continue;
+    }
+    fprintf(stderr, "\"%p\" [label=\"%s [%p]\"];\n", node[0],
+            node[0]->command->debug_label, node[0]);
+    pc walk = {node[0], array};
+    // First add all of our children to the circular array.
+    iree_hash_map_walk(node[0]->children, print_children, &walk);
+    iree_circular_array_pop_front(array);
+    iree_hash_map_element_t* dummy;
+    iree_hash_map_insert(inserted, (uint64_t)node[0], &dummy);
+  }
+  fprintf(stderr, "}\n");
+}
+
+typedef struct iree_hal_hip_buffer_interval_t {
+  iree_hal_hip_graph_node_t* last_written_by;
+} iree_hal_hip_buffer_interval_t;
+#define IREE_READ_INTERVAL_MAX_READS 256
+typedef struct iree_hal_hip_buffer_read_interval_t {
+  iree_hal_hip_graph_node_t* last_read_by[IREE_READ_INTERVAL_MAX_READS];
+  uint32_t last_read_count;
+} iree_hal_hip_buffer_read_interval_t;
+#endif
 
 typedef struct iree_hal_hip_stream_command_buffer_t {
   iree_hal_command_buffer_t base;
@@ -97,27 +205,45 @@ typedef struct iree_hal_hip_stream_command_buffer_t {
   // The current bound descriptor sets.
   struct {
     hipDeviceptr_t bindings[IREE_HAL_HIP_MAX_DESCRIPTOR_SET_BINDING_COUNT];
+    iree_host_size_t
+        binding_sizes[IREE_HAL_HIP_MAX_DESCRIPTOR_SET_BINDING_COUNT];
   } descriptor_sets[IREE_HAL_HIP_MAX_DESCRIPTOR_SET_COUNT];
-#if USE_EVENT_POOL
+#if POOL_TYPE == 0
   iree_hal_hip_event_pool_t* event_pool;
   iree_hal_hip_sync_event_list_t* event_list;
   iree_hal_hip_event_t* last_sync_event;
-#else
+#elif POOL_TYPE == 1
   int32_t* event_mem;
   int32_t event_num[MAX_STREAMS];
   command buffered_commands[1024];
   int32_t num_buffered_commands;
+#elif POOL_TYPE == 2
+  iree_interval_list_t* buffer_writes;
+  iree_interval_list_t* buffer_reads;
+  iree_hal_hip_graph_node_t*
+      heads[MAX_GRAPH_HEADS];  // hopefully no more than this?
+  int32_t num_graph_heads;
+  int32_t total_elements;
 #endif
 
   int32_t current_stream;
 } iree_hal_hip_stream_command_buffer_t;
 
+int32_t increment_stream(int32_t* current_stream) {
+  if (*current_stream == MAX_STREAMS) {
+    return (*current_stream) - 1;
+  }
+  return (*current_stream)++;
+}
+
+#if POOL_TYPE == 1
 static iree_status_t iree_hal_hip_stream_command_buffer_apply_buffered_commands(
     iree_hal_hip_stream_command_buffer_t* cb) {
   iree_status_t status = iree_ok_status();
   for (int i = 0; i < cb->num_buffered_commands && iree_status_is_ok(status);
        ++i) {
-    status = cb->buffered_commands[i].apply(cb, &cb->buffered_commands[i]);
+    status = cb->buffered_commands[i].apply(cb, &cb->buffered_commands[i],
+                                            cb->current_stream++);
   }
   cb->num_buffered_commands = 0;
   return status;
@@ -128,6 +254,7 @@ static command* iree_hal_hip_stream_command_buffer_get_next_buffered_command(
   IREE_ASSERT(cb->num_buffered_commands < MAX_BUFFERED_COMMANDS);
   return &cb->buffered_commands[cb->num_buffered_commands++];
 }
+#endif
 
 static const iree_hal_command_buffer_vtable_t
     iree_hal_hip_stream_command_buffer_vtable;
@@ -137,7 +264,7 @@ iree_hal_hip_stream_command_buffer_cast(iree_hal_command_buffer_t* base_value) {
   IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_hip_stream_command_buffer_vtable);
   return (iree_hal_hip_stream_command_buffer_t*)base_value;
 }
-#if USE_EVENT_POOL
+#if POOL_TYPE == 0
 iree_status_t iree_hal_hip_stream_command_buffer_allocate_event(
     iree_hal_hip_stream_command_buffer_t* command_buffer,
     iree_hal_hip_event_t** out_event) {
@@ -200,10 +327,10 @@ iree_status_t iree_hal_hip_stream_command_buffer_create(
   command_buffer->tracing_event_list.head = NULL;
   command_buffer->tracing_event_list.tail = NULL;
   command_buffer->hip_queue = queue;
-#if USE_EVENT_POOL
+#if POOL_TYPE == 0
   command_buffer->event_pool = event_pool;
   command_buffer->event_list = NULL;
-#else
+#elif POOL_TYPE == 1
   IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
       z0, command_buffer->hip_symbols,
       hipExtMallocWithFlags((void**)&command_buffer->event_mem,
@@ -212,11 +339,26 @@ iree_status_t iree_hal_hip_stream_command_buffer_create(
       "hipMalloc");
   memset(command_buffer->event_num, 0x00, sizeof(command_buffer->event_num));
 #endif
+
+  iree_status_t status = iree_ok_status();
+#if POOL_TYPE == 2
+  status = iree_interval_list_create(host_allocator,
+                                     sizeof(iree_hal_hip_buffer_interval_t),
+                                     &command_buffer->buffer_writes);
+
+  if (iree_status_is_ok(status)) {
+    status = iree_interval_list_create(
+        host_allocator, sizeof(iree_hal_hip_buffer_read_interval_t),
+        &command_buffer->buffer_reads);
+  }
+  command_buffer->num_graph_heads = 0;
+#endif
+
   command_buffer->current_stream = 0;
 
   iree_arena_initialize(block_pool, &command_buffer->arena);
 
-  iree_status_t status =
+  status =
       iree_hal_resource_set_allocate(block_pool, &command_buffer->resource_set);
 
   if (iree_status_is_ok(status)) {
@@ -226,9 +368,176 @@ iree_status_t iree_hal_hip_stream_command_buffer_create(
   }
 
   *out_command_buffer = &command_buffer->base;
+
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
+
+#if POOL_TYPE == 2
+static void iree_hal_hip_stream_command_buffer_get_last_writes(
+    iree_hal_hip_stream_command_buffer_t* cb, hipDeviceptr_t base,
+    iree_host_size_t size, iree_interval_t** write_begin,
+    iree_interval_t** write_end) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_interval_list_find(cb->buffer_writes, (uint64_t)base, (uint64_t)size,
+                          write_begin, write_end);
+  IREE_TRACE_ZONE_END(z0);
+}
+
+static void iree_hal_hip_stream_command_buffer_get_last_reads(
+    iree_hal_hip_stream_command_buffer_t* cb, hipDeviceptr_t base,
+    iree_host_size_t size, iree_interval_t** read_begin,
+    iree_interval_t** read_end) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_interval_list_find(cb->buffer_reads, (uint64_t)base, (uint64_t)size,
+                          read_begin, read_end);
+  IREE_TRACE_ZONE_END(z0);
+}
+
+static iree_hal_hip_buffer_interval_t* iree_hal_hip_write_interval_get_data(
+    iree_interval_t* interval) {
+  return (iree_hal_hip_buffer_interval_t*)iree_interval_get_data(interval);
+}
+
+static iree_hal_hip_buffer_read_interval_t* iree_hal_hip_read_interval_get_data(
+    iree_interval_t* interval) {
+  return (iree_hal_hip_buffer_read_interval_t*)iree_interval_get_data(interval);
+}
+
+static iree_status_t iree_hal_hip_stream_command_buffer_register_write(
+    iree_hal_hip_stream_command_buffer_t* cb, hipDeviceptr_t base,
+    iree_host_size_t size, iree_hal_hip_graph_node_t* node) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_interval_t* interval;
+  iree_status_t status = iree_interval_list_insert(
+      cb->buffer_writes, (uint64_t)base, size, &interval);
+  IREE_ASSERT(iree_status_is_ok(status));  // TODO: error handling
+  iree_hal_hip_write_interval_get_data(interval)->last_written_by = node;
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t iree_hal_hip_stream_command_buffer_register_read(
+    iree_hal_hip_stream_command_buffer_t* cb, hipDeviceptr_t base,
+    iree_host_size_t size, iree_hal_hip_graph_node_t* node) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_interval_t* interval_begin;
+  iree_interval_t* interval_end;
+  iree_status_t status = iree_interval_list_insert_no_overwrite(
+      cb->buffer_reads, (uint64_t)base, size, &interval_begin, &interval_end);
+  IREE_ASSERT(iree_status_is_ok(status));  // TODO: error handling
+  while (interval_begin != interval_end) {
+    iree_hal_hip_buffer_read_interval_t* interval =
+        iree_hal_hip_read_interval_get_data(interval_begin);
+    IREE_ASSERT(interval->last_read_count < IREE_READ_INTERVAL_MAX_READS);
+    interval->last_read_by[interval->last_read_count++] = node;
+    interval_begin = iree_interval_next(interval_begin);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t iree_hal_hip_stream_command_buffer_add_buffer_access(
+    iree_hal_hip_stream_command_buffer_t* cb, iree_hal_hip_graph_node_t* node,
+    bool is_write, hipDeviceptr_t base, iree_host_size_t size,
+    iree_host_size_t* num_parents) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (is_write) {
+    iree_interval_t* begin;
+    iree_interval_t* end;
+    iree_hal_hip_stream_command_buffer_get_last_reads(cb, base, size, &begin,
+                                                      &end);
+    while (begin != end) {
+      iree_hal_hip_buffer_read_interval_t* read =
+          iree_hal_hip_read_interval_get_data(begin);
+      for (iree_host_size_t i = 0; i < read->last_read_count; ++i) {
+        iree_hash_map_element_t* inserted = NULL;
+        IREE_RETURN_AND_END_ZONE_IF_ERROR(
+            z0, iree_hash_map_try_insert(
+                    node->parents, (uint64_t)read->last_read_by[i], &inserted));
+        (*num_parents)++;
+        if (inserted) {
+          IREE_RETURN_AND_END_ZONE_IF_ERROR(
+              z0, iree_hash_map_try_insert(read->last_read_by[i]->children,
+                                           (uint64_t)node, &inserted));
+        }
+      }
+      begin = iree_interval_next(begin);
+    }
+    iree_interval_list_erase(cb->buffer_reads, (uint64_t)base, size);
+  }
+
+  iree_interval_t* begin;
+  iree_interval_t* end;
+  iree_hal_hip_stream_command_buffer_get_last_writes(cb, base, size, &begin,
+                                                     &end);
+  while (begin != end) {
+    iree_hal_hip_buffer_interval_t* write =
+        iree_hal_hip_write_interval_get_data(begin);
+
+    iree_hash_map_element_t* inserted = NULL;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hash_map_try_insert(
+                node->parents, (uint64_t)write->last_written_by, &inserted));
+    if (inserted) {
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_hash_map_try_insert(write->last_written_by->children,
+                                       (uint64_t)node, &inserted));
+      (*num_parents)++;
+    }
+    begin = iree_interval_next(begin);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+void iree_hal_hip_stream_command_buffer_add_root_node(
+    iree_hal_hip_stream_command_buffer_t* cb, iree_hal_hip_graph_node_t* node) {
+  IREE_ASSERT(cb->num_graph_heads < MAX_GRAPH_HEADS - 1);
+  cb->heads[cb->num_graph_heads++] = node;
+}
+
+void iree_hal_hip_stream_command_buffer_destroy_graph_node(
+    iree_hal_hip_stream_command_buffer_t* cb, iree_hal_hip_graph_node_t* node) {
+  if (node->children) {
+    iree_hash_map_destroy(node->children);
+  }
+  if (node->parents) {
+    iree_hash_map_destroy(node->children);
+  }
+  iree_allocator_free(cb->host_allocator, node->command);
+}
+
+iree_status_t iree_hal_hip_stream_command_buffer_create_graph_node(
+    iree_hal_hip_stream_command_buffer_t* cb,
+    iree_hal_hip_graph_node_t** node) {
+  iree_hal_hip_graph_node_t* graph_node;
+
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(cb->host_allocator,
+                                             sizeof(iree_hal_hip_graph_node_t),
+                                             (void**)&graph_node));
+  iree_status_t status = iree_allocator_malloc(
+      cb->host_allocator, sizeof(command), (void**)&graph_node->command);
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hash_map_create(cb->host_allocator, 0, 8, &graph_node->parents);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hash_map_create(cb->host_allocator, 0, 8, &graph_node->children);
+  }
+
+  if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
+    iree_hal_hip_stream_command_buffer_destroy_graph_node(cb, graph_node);
+  }
+  *node = graph_node;
+  return status;
+}
+
+#endif
 
 static void iree_hal_hip_stream_command_buffer_destroy(
     iree_hal_command_buffer_t* base_command_buffer) {
@@ -243,16 +552,25 @@ static void iree_hal_hip_stream_command_buffer_destroy(
   iree_hal_collective_batch_deinitialize(&command_buffer->collective_batch);
   iree_hal_resource_set_free(command_buffer->resource_set);
 
-#if USE_EVENT_POOL
+#if POOL_TYPE == 0
   while (command_buffer->event_list) {
     iree_hal_hip_sync_event_list_t* list = command_buffer->event_list;
     iree_hal_hip_event_release(list->event);
     command_buffer->event_list = list->next;
     iree_allocator_free(host_allocator, list);
   }
-#else
+#elif POOL_TYPE == 1
+  IREE_TRACE_ZONE_BEGIN_NAMED(z1, "FreeAsync");
   IREE_HIP_IGNORE_ERROR(command_buffer->hip_symbols,
-                        hipFree(command_buffer->event_mem));
+                        hipFreeAsync(command_buffer->event_mem,
+                                     iree_hal_hip_queue_get_stream(
+                                         command_buffer->hip_queue, 0)));
+  IREE_TRACE_ZONE_END(z1);
+#elif POOL_TYPE == 2
+
+  if (command_buffer->buffer_writes) {
+    iree_interval_list_free(command_buffer->buffer_writes);
+  }
 #endif
   iree_arena_deinitialize(&command_buffer->arena);
   iree_allocator_free(host_allocator, command_buffer);
@@ -290,6 +608,7 @@ static iree_status_t iree_hal_hip_stream_command_buffer_flush_collectives(
           &command_buffer->collective_batch))) {
     return iree_ok_status();
   }
+  IREE_ASSERT(false, "Not handling this yet");
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_status_t status = iree_hal_hip_nccl_submit_batch(
@@ -315,7 +634,7 @@ static iree_status_t iree_hal_hip_stream_command_buffer_begin(
       strlen("iree_hal_hip_stream_command_buffer"),
       /*name=*/NULL, 0);
 
-#if USE_EVENT_POOL
+#if POOL_TYPE == 0
   // Create an event so that every subsequent stream can wait on it.
   iree_hal_hip_event_t* event;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -340,7 +659,7 @@ static iree_status_t iree_hal_hip_stream_command_buffer_end(
   iree_hal_hip_stream_command_buffer_t* command_buffer =
       iree_hal_hip_stream_command_buffer_cast(base_command_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
-#if USE_EVENT_POOL
+#if POOL_TYPE == 0
   // If we have more than one stream active, have stream0 wait on all of them
   for (int32_t i = 1; i < command_buffer->current_stream; ++i) {
     iree_hal_hip_event_t* event;
@@ -362,8 +681,11 @@ static iree_status_t iree_hal_hip_stream_command_buffer_end(
             iree_hal_hip_event_handle(event), 0),
         "hipStreamWaitEvent");
   }
-#else
-  if (IREE_LIKELY(command_buffer->num_buffered_commands <= 1)) {
+#elif POOL_TYPE == 1
+  int32_t last_active_streams = command_buffer->current_stream;
+  command_buffer->current_stream = 0;
+  if (last_active_streams == 0 || (command_buffer->num_buffered_commands <= 1 &&
+                                   last_active_streams == 1)) {
     iree_hal_hip_stream_command_buffer_apply_buffered_commands(command_buffer);
   } else {
     const int32_t num_buffered_commands = command_buffer->num_buffered_commands;
@@ -412,6 +734,45 @@ static iree_status_t iree_hal_hip_stream_command_buffer_end(
       }
     }
   }
+#elif POOL_TYPE == 2
+  // if(command_buffer->total_elements > 1) {
+  //   iree_hal_hip_graph_buffer_print(command_buffer->host_allocator,
+  //   command_buffer->heads, command_buffer->num_graph_heads);
+  // }
+
+  iree_circular_array_t* array;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_circular_array_create(command_buffer->host_allocator, 1024,
+                                 sizeof(iree_hal_hip_graph_node_t*), &array));
+
+  for (size_t i = 0; i < command_buffer->num_graph_heads; ++i) {
+    iree_hal_hip_graph_node_t** node;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_circular_array_push_back(array, (void**)&node));
+    *node = command_buffer->heads[i];
+  }
+
+  while (iree_circular_array_size(array)) {
+    iree_hal_hip_graph_node_t** node;
+    iree_circular_array_front(array, (void**)&node);
+    // All of our parents have been scheduled, we can too.
+    if (!node[0]->scheduled_stream && iree_hash_map_size(node[0]->parents) ==
+                                          node[0]->num_parents_scheduled) {
+      // First add all of our children to the circular array.
+      iree_hash_map_walk(node[0]->children, insert_nodes_into_circular_array,
+                         array);
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, node[0]->command->apply(command_buffer, node[0]->command, 0));
+      node[0]->scheduled_stream = ~0;
+
+      if (command_buffer->total_elements > 1) {
+        fprintf(stderr, "%p\n", node[0]);
+      }
+    }
+    iree_circular_array_pop_front(array);
+  }
+  iree_circular_array_free(array);
 #endif
   command_buffer->current_stream = 0;
 
@@ -488,7 +849,7 @@ static iree_status_t iree_hal_hip_stream_command_buffer_execution_barrier(
                             "non-zero barrier flag not yet supported");
   }
   IREE_TRACE_ZONE_BEGIN(z0);
-#if USE_EVENT_POOL
+#if POOL_TYPE == 0
 
   // If we have more than one stream active, have stream0 wait on all of them
   for (int32_t i = 1; i < command_buffer->current_stream; ++i) {
@@ -531,8 +892,11 @@ static iree_status_t iree_hal_hip_stream_command_buffer_execution_barrier(
           iree_hal_hip_queue_get_stream(command_buffer->hip_queue, 0)),
       "hipEventRecord");
   command_buffer->last_sync_event = event;
-#else
-  if (IREE_LIKELY(command_buffer->num_buffered_commands <= 1)) {
+#elif POOL_TYPE == 1
+  int32_t last_active_streams = command_buffer->current_stream;
+  command_buffer->current_stream = 0;
+  if (last_active_streams == 0 || (command_buffer->num_buffered_commands <= 1 &&
+                                   last_active_streams == 1)) {
     iree_hal_hip_stream_command_buffer_apply_buffered_commands(command_buffer);
   } else {
     const int32_t num_buffered_commands = command_buffer->num_buffered_commands;
@@ -629,7 +993,8 @@ static iree_status_t iree_hal_hip_stream_command_buffer_discard_buffer(
 }
 
 iree_status_t iree_hal_hip_stream_command_buffer_apply_deferred_fill_buffer(
-    iree_hal_hip_stream_command_buffer_t* command_buffer, command* command) {
+    iree_hal_hip_stream_command_buffer_t* command_buffer, command* command,
+    uint32_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   switch (command->fill_buffer.pattern_length) {
@@ -640,8 +1005,7 @@ iree_status_t iree_hal_hip_stream_command_buffer_apply_deferred_fill_buffer(
               command->fill_buffer.dst,
               *(const uint32_t*)(&command->fill_buffer.pattern),
               command->fill_buffer.count,
-              iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
-                                            command_buffer->current_stream++)),
+              iree_hal_hip_queue_get_stream(command_buffer->hip_queue, stream)),
           "hipMemsetD32Async");
       break;
     }
@@ -652,8 +1016,7 @@ iree_status_t iree_hal_hip_stream_command_buffer_apply_deferred_fill_buffer(
               command->fill_buffer.dst,
               *(const uint16_t*)(&command->fill_buffer.pattern),
               command->fill_buffer.count,
-              iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
-                                            command_buffer->current_stream++)),
+              iree_hal_hip_queue_get_stream(command_buffer->hip_queue, stream)),
           "hipMemsetD16Async");
       break;
     }
@@ -664,8 +1027,7 @@ iree_status_t iree_hal_hip_stream_command_buffer_apply_deferred_fill_buffer(
               command->fill_buffer.dst,
               *(const uint8_t*)(&command->fill_buffer.pattern),
               command->fill_buffer.count,
-              iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
-                                            command_buffer->current_stream++)),
+              iree_hal_hip_queue_get_stream(command_buffer->hip_queue, stream)),
           "hipMemsetD8Async");
       break;
     }
@@ -697,7 +1059,7 @@ static iree_status_t iree_hal_hip_stream_command_buffer_fill_buffer(
   hipDeviceptr_t dst = (uint8_t*)target_device_buffer + target_offset;
   size_t num_elements = target_ref.length / pattern_length;
 
-#if USE_EVENT_POOL
+#if POOL_TYPE == 0
   if (IREE_UNLIKELY(command_buffer->current_stream > 0)) {
     IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
         z0, command_buffer->hip_symbols,
@@ -743,7 +1105,7 @@ static iree_status_t iree_hal_hip_stream_command_buffer_fill_buffer(
       return iree_make_status(IREE_STATUS_INTERNAL,
                               "unsupported fill pattern length");
   }
-#else
+#elif POOL_TYPE == 1
   if (pattern_length != 1 && pattern_length != 2 && pattern_length != 4) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INTERNAL,
@@ -754,6 +1116,35 @@ static iree_status_t iree_hal_hip_stream_command_buffer_fill_buffer(
   cmd->fill_buffer = (fill_buffer){dst, 0, pattern_length, num_elements};
   memcpy(&cmd->fill_buffer.pattern, pattern, pattern_length);
   cmd->apply = &iree_hal_hip_stream_command_buffer_apply_deferred_fill_buffer;
+  cmd->debug_label = "fill_buffer";
+#elif POOL_TYPE == 2
+  if (pattern_length != 1 && pattern_length != 2 && pattern_length != 4) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "unsupported fill pattern length");
+  }
+  iree_hal_hip_graph_node_t* node;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_hip_stream_command_buffer_create_graph_node(command_buffer,
+                                                               &node));
+
+  command* cmd = node->command;
+  cmd->fill_buffer = (fill_buffer){dst, 0, pattern_length, num_elements};
+  memcpy(&cmd->fill_buffer.pattern, pattern, pattern_length);
+  cmd->apply = &iree_hal_hip_stream_command_buffer_apply_deferred_fill_buffer;
+  cmd->debug_label = "fill_buffer";
+  iree_host_size_t num_parents = 0;
+  iree_hal_hip_stream_command_buffer_add_buffer_access(
+      command_buffer, node, true, dst, pattern_length * num_elements,
+      &num_parents);
+  // TODO proper error handling
+  IREE_ASSERT(
+      iree_status_is_ok(iree_hal_hip_stream_command_buffer_register_write(
+          command_buffer, dst, pattern_length * num_elements, node)));
+  if (!num_parents) {
+    iree_hal_hip_stream_command_buffer_add_root_node(command_buffer, node);
+  }
+  command_buffer->total_elements++;
 #endif
 
   IREE_TRACE_ZONE_END(z0);
@@ -761,7 +1152,8 @@ static iree_status_t iree_hal_hip_stream_command_buffer_fill_buffer(
 }
 
 iree_status_t iree_hal_hip_stream_command_buffer_apply_deferred_update_buffer(
-    iree_hal_hip_stream_command_buffer_t* command_buffer, command* command) {
+    iree_hal_hip_stream_command_buffer_t* command_buffer, command* command,
+    uint32_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
@@ -769,8 +1161,7 @@ iree_status_t iree_hal_hip_stream_command_buffer_apply_deferred_update_buffer(
       hipMemcpyHtoDAsync(
           command->update_buffer.dst, command->update_buffer.src,
           command->update_buffer.sizeBytes,
-          iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
-                                        command_buffer->current_stream++)),
+          iree_hal_hip_queue_get_stream(command_buffer->hip_queue, stream)),
       "hipMemcpyHtoDAsync");
 
   IREE_TRACE_ZONE_END(z0);
@@ -810,7 +1201,7 @@ static iree_status_t iree_hal_hip_stream_command_buffer_update_buffer(
                        iree_hal_buffer_byte_offset(target_ref.buffer) +
                        target_ref.offset;
 
-#if USE_EVENT_POOL
+#if POOL_TYPE == 0
   if (IREE_UNLIKELY(command_buffer->current_stream > 0)) {
     IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
         z0, command_buffer->hip_symbols,
@@ -829,11 +1220,33 @@ static iree_status_t iree_hal_hip_stream_command_buffer_update_buffer(
                                         command_buffer->current_stream++)),
       "hipMemcpyHtoDAsync");
 
-#else
+#elif POOL_TYPE == 1
   command* cmd = iree_hal_hip_stream_command_buffer_get_next_buffered_command(
       command_buffer);
   cmd->update_buffer = (update_buffer){dst, (void*)src, target_ref.length};
   cmd->apply = &iree_hal_hip_stream_command_buffer_apply_deferred_update_buffer;
+  cmd->debug_label = "fill_buffer";
+#elif POOL_TYPE == 2
+  iree_hal_hip_graph_node_t* node;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_hip_stream_command_buffer_create_graph_node(command_buffer,
+                                                               &node));
+
+  command* cmd = node->command;
+  cmd->update_buffer = (update_buffer){dst, (void*)src, target_ref.length};
+  cmd->apply = &iree_hal_hip_stream_command_buffer_apply_deferred_update_buffer;
+  cmd->debug_label = "fill_buffer";
+  iree_host_size_t num_parents = 0;
+  iree_hal_hip_stream_command_buffer_add_buffer_access(
+      command_buffer, node, true, dst, target_ref.length, &num_parents);
+  // TODO proper error handling
+  IREE_ASSERT(
+      iree_status_is_ok(iree_hal_hip_stream_command_buffer_register_write(
+          command_buffer, dst, target_ref.length, node)));
+  if (!num_parents) {
+    iree_hal_hip_stream_command_buffer_add_root_node(command_buffer, node);
+  }
+  command_buffer->total_elements++;
 #endif
 
   IREE_TRACE_ZONE_END(z0);
@@ -841,7 +1254,8 @@ static iree_status_t iree_hal_hip_stream_command_buffer_update_buffer(
 }
 
 iree_status_t iree_hal_hip_stream_command_buffer_apply_deferred_copy_buffer(
-    iree_hal_hip_stream_command_buffer_t* command_buffer, command* command) {
+    iree_hal_hip_stream_command_buffer_t* command_buffer, command* command,
+    uint32_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
@@ -849,8 +1263,7 @@ iree_status_t iree_hal_hip_stream_command_buffer_apply_deferred_copy_buffer(
       hipMemcpyAsync(
           command->copy_buffer.dst, command->copy_buffer.src,
           command->copy_buffer.sizeBytes, command->copy_buffer.kind,
-          iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
-                                        command_buffer->current_stream++)),
+          iree_hal_hip_queue_get_stream(command_buffer->hip_queue, stream)),
       "hipMemcpyAsync");
 
   IREE_TRACE_ZONE_END(z0);
@@ -878,7 +1291,7 @@ static iree_status_t iree_hal_hip_stream_command_buffer_copy_buffer(
   hipDeviceptr_t dst = (uint8_t*)target_device_buffer + target_offset;
   hipDeviceptr_t src = (uint8_t*)source_device_buffer + source_offset;
 
-#if USE_EVENT_POOL
+#if POOL_TYPE == 0
   if (IREE_UNLIKELY(command_buffer->current_stream > 0)) {
     IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
         z0, command_buffer->hip_symbols,
@@ -897,12 +1310,40 @@ static iree_status_t iree_hal_hip_stream_command_buffer_copy_buffer(
                                         command_buffer->current_stream++)),
       "hipMemcpyAsync");
 
-#else
+#elif POOL_TYPE == 1
   command* cmd = iree_hal_hip_stream_command_buffer_get_next_buffered_command(
       command_buffer);
   cmd->copy_buffer =
       (copy_buffer){dst, src, target_ref.length, hipMemcpyDeviceToDevice};
   cmd->apply = &iree_hal_hip_stream_command_buffer_apply_deferred_copy_buffer;
+  cmd->debug_label = "copy_buffer";
+#elif POOL_TYPE == 2
+  iree_hal_hip_graph_node_t* node;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_hip_stream_command_buffer_create_graph_node(command_buffer,
+                                                               &node));
+
+  command* cmd = node->command;
+  cmd->copy_buffer =
+      (copy_buffer){dst, src, target_ref.length, hipMemcpyDeviceToDevice};
+  cmd->apply = &iree_hal_hip_stream_command_buffer_apply_deferred_copy_buffer;
+  cmd->debug_label = "copy_buffer";
+  iree_host_size_t num_parents = 0;
+  iree_hal_hip_stream_command_buffer_add_buffer_access(
+      command_buffer, node, false, src, target_ref.length, &num_parents);
+  iree_hal_hip_stream_command_buffer_add_buffer_access(
+      command_buffer, node, true, dst, target_ref.length, &num_parents);
+  // TODO proper error handling
+  IREE_ASSERT(
+      iree_status_is_ok(iree_hal_hip_stream_command_buffer_register_write(
+          command_buffer, dst, target_ref.length, node)));
+  IREE_ASSERT(
+      iree_status_is_ok(iree_hal_hip_stream_command_buffer_register_read(
+          command_buffer, src, target_ref.length, node)));
+  if (!num_parents) {
+    iree_hal_hip_stream_command_buffer_add_root_node(command_buffer, node);
+  }
+  command_buffer->total_elements++;
 #endif
 
   IREE_TRACE_ZONE_END(z0);
@@ -971,9 +1412,12 @@ static iree_status_t iree_hal_hip_stream_command_buffer_push_descriptor_set(
 
   hipDeviceptr_t* current_bindings =
       command_buffer->descriptor_sets[set].bindings;
+  iree_host_size_t* current_sizes =
+      command_buffer->descriptor_sets[set].binding_sizes;
   for (iree_host_size_t i = 0; i < binding_count; i++) {
     const iree_hal_buffer_ref_t* binding = &bindings[i];
     hipDeviceptr_t device_ptr = NULL;
+    iree_host_size_t size = 0;
     if (binding->buffer) {
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, iree_hal_resource_set_insert(command_buffer->resource_set, 1,
@@ -983,8 +1427,14 @@ static iree_status_t iree_hal_hip_stream_command_buffer_push_descriptor_set(
           iree_hal_buffer_allocated_buffer(binding->buffer));
       iree_device_size_t offset = iree_hal_buffer_byte_offset(binding->buffer);
       device_ptr = (uint8_t*)device_buffer + offset + binding->offset;
+      size = binding->length;
+      if (size == IREE_WHOLE_BUFFER) {
+        size =
+            iree_hal_buffer_allocation_size(binding->buffer) - binding->offset;
+      }
     }
     current_bindings[binding->ordinal] = device_ptr;
+    current_sizes[binding->ordinal] = size;
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -992,7 +1442,8 @@ static iree_status_t iree_hal_hip_stream_command_buffer_push_descriptor_set(
 }
 
 iree_status_t iree_hal_hip_stream_command_buffer_apply_deferred_dispatch(
-    iree_hal_hip_stream_command_buffer_t* command_buffer, command* command) {
+    iree_hal_hip_stream_command_buffer_t* command_buffer, command* command,
+    uint32_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_status_t status = IREE_HIP_RESULT_TO_STATUS(
@@ -1002,8 +1453,7 @@ iree_status_t iree_hal_hip_stream_command_buffer_apply_deferred_dispatch(
           command->dispatch.gridDimY, command->dispatch.gridDimZ,
           command->dispatch.blockDimX, command->dispatch.blockDimY,
           command->dispatch.blockDimZ, command->dispatch.sharedMemBytes,
-          iree_hal_hip_queue_get_stream(command_buffer->hip_queue,
-                                        command_buffer->current_stream++),
+          iree_hal_hip_queue_get_stream(command_buffer->hip_queue, stream),
           command->dispatch.kernelParams, NULL),
       "hipModuleLaunchKernel");
 
@@ -1095,7 +1545,7 @@ static iree_status_t iree_hal_hip_stream_command_buffer_dispatch(
         command_buffer->push_constants[i];
   }
 
-#if USE_EVENT_POOL
+#if POOL_TYPE == 0
   if (IREE_UNLIKELY(command_buffer->current_stream > 0)) {
     IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
         z0, command_buffer->hip_symbols,
@@ -1117,8 +1567,8 @@ static iree_status_t iree_hal_hip_stream_command_buffer_dispatch(
           params_ptr, NULL),
       "hipModuleLaunchKernel");
 
-#else
   iree_status_t status = iree_ok_status();
+#elif POOL_TYPE == 1
   command* cmd = iree_hal_hip_stream_command_buffer_get_next_buffered_command(
       command_buffer);
   cmd->dispatch = (dispatch){kernel_info.function,
@@ -1131,13 +1581,78 @@ static iree_status_t iree_hal_hip_stream_command_buffer_dispatch(
                              kernel_info.shared_memory_size,
                              params_ptr};
   cmd->apply = &iree_hal_hip_stream_command_buffer_apply_deferred_dispatch;
+  cmd->debug_label = "dispatch";
+#elif POOL_TYPE == 2
+  iree_hal_hip_graph_node_t* node;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_hip_stream_command_buffer_create_graph_node(command_buffer,
+                                                               &node));
+
+  command* cmd = node->command;
+  cmd->dispatch = (dispatch){kernel_info.function,
+                             workgroup_x,
+                             workgroup_y,
+                             workgroup_z,
+                             kernel_info.block_size[0],
+                             kernel_info.block_size[1],
+                             kernel_info.block_size[2],
+                             kernel_info.shared_memory_size,
+                             params_ptr};
+  cmd->apply = &iree_hal_hip_stream_command_buffer_apply_deferred_dispatch;
+  cmd->debug_label = "dispatch";
+
+  iree_host_size_t num_parents = 0;
+  for (iree_host_size_t i = 0; i < set_count; ++i) {
+    const iree_hal_descriptor_set_layout_t* layout =
+        iree_hal_hip_pipeline_layout_descriptor_set_layout(kernel_info.layout,
+                                                           i);
+    // TODO: cache this information in the kernel info to avoid recomputation.
+    iree_host_size_t binding_count =
+        iree_hal_hip_descriptor_set_layout_binding_count(layout);
+    iree_hal_descriptor_flags_t* flags =
+        iree_hal_hip_descriptor_set_layout_binding_flags(layout);
+    for (iree_host_size_t j = 0; j < binding_count; ++j) {
+      hipDeviceptr_t ptr = command_buffer->descriptor_sets[i].bindings[j];
+      iree_host_size_t sz = command_buffer->descriptor_sets[i].binding_sizes[j];
+      iree_hal_hip_stream_command_buffer_add_buffer_access(
+          command_buffer, node, flags[j] == IREE_HAL_DESCRIPTOR_FLAG_NONE, ptr,
+          sz, &num_parents);
+    }
+  }
+  for (iree_host_size_t i = 0; i < set_count; ++i) {
+    const iree_hal_descriptor_set_layout_t* layout =
+        iree_hal_hip_pipeline_layout_descriptor_set_layout(kernel_info.layout,
+                                                           i);
+    // TODO: cache this information in the kernel info to avoid recomputation.
+    iree_host_size_t binding_count =
+        iree_hal_hip_descriptor_set_layout_binding_count(layout);
+    iree_hal_descriptor_flags_t* flags =
+        iree_hal_hip_descriptor_set_layout_binding_flags(layout);
+    for (iree_host_size_t j = 0; j < binding_count; ++j) {
+      hipDeviceptr_t ptr = command_buffer->descriptor_sets[i].bindings[j];
+      iree_host_size_t sz = command_buffer->descriptor_sets[i].binding_sizes[j];
+      if (flags[j] == IREE_HAL_DESCRIPTOR_FLAG_NONE) {
+        IREE_ASSERT(
+            iree_status_is_ok(iree_hal_hip_stream_command_buffer_register_write(
+                command_buffer, ptr, sz, node)));
+      } else {
+        IREE_ASSERT(
+            iree_status_is_ok(iree_hal_hip_stream_command_buffer_register_read(
+                command_buffer, ptr, sz, node)));
+      }
+    }
+  }
+  if (!num_parents) {
+    iree_hal_hip_stream_command_buffer_add_root_node(command_buffer, node);
+  }
+  command_buffer->total_elements++;
 #endif
   // IREE_HIP_STREAM_TRACE_ZONE_END(command_buffer->tracing_context,
   //                                &command_buffer->tracing_event_list,
   //                                command_buffer->hip_stream);
 
   IREE_TRACE_ZONE_END(z0);
-  return status;
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_hip_stream_command_buffer_dispatch_indirect(
