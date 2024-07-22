@@ -129,7 +129,7 @@ void iree_interval_list_find_inclusive(iree_interval_list_t* interval_list,
     *begin = iree_tree_last(interval_list);
     iree_interval_list_interval_data_t* begin_data =
         (iree_interval_list_interval_data_t*)iree_tree_node_get_data(*begin);
-    if (begin_data->offset + begin_data->size < offset) {
+    if (begin_data->offset + begin_data->size <= offset) {
       *begin = NULL;
       return;
     }
