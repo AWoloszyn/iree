@@ -1058,12 +1058,12 @@ static iree_status_t iree_hal_hip_pending_queue_actions_issue_execution(
         hipEventCreateWithFlags(&completion_event, hipEventDisableTiming),
         "hipEventCreateWithFlags");
     created_event = true;
+    IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, symbols,
+        hipEventRecord(completion_event, action->dispatch_hip_stream),
+        "hipEventRecord");
   }
 
-  IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, symbols,
-      hipEventRecord(completion_event, action->dispatch_hip_stream),
-      "hipEventRecord");
   iree_slim_mutex_lock(
       &action->owning_actions->working_area.pending_work_items_count_mutex);
   // One work item is the callback that makes it across from the
