@@ -17,6 +17,7 @@
 #include "iree/base/internal/synchronization.h"
 #include "iree/base/internal/threading.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/utils/semaphore.h"
 #include "iree/hal/utils/deferred_command_buffer.h"
 #include "iree/hal/utils/resource_set.h"
 
@@ -704,6 +705,7 @@ iree_status_t iree_hal_deferred_work_queue_enque(
   uint8_t* action_ptr = (uint8_t*)action + sizeof(*action);
 
   action->owning_actions = actions;
+  action->symbols = actions->symbols;
   action->state = IREE_HAL_QUEUE_ACTION_STATE_ALIVE;
   action->cleanup_callback = cleanup_callback;
   action->callback_user_data = callback_user_data;
@@ -1186,7 +1188,8 @@ iree_status_t iree_hal_deferred_work_queue_issue(
         if (value >= values[i]) {
           // No need to wait on this timepoint as it has already occurred and
           // we can remove it from the wait list.
-          iree_hal_semaphore_list_erase(&action->wait_semaphore_list, i);
+          iree_hal_semaphore_list_remove_element(&action->wait_semaphore_list,
+                                                 i);
           --i;
           continue;
         }
@@ -1222,7 +1225,7 @@ iree_status_t iree_hal_deferred_work_queue_issue(
 
         // Remove the wait timepoint as we have a corresponding event that we
         // will wait on.
-        iree_hal_semaphore_list_erase(&action->wait_semaphore_list, i);
+        iree_hal_semaphore_list_remove_element(&action->wait_semaphore_list, i);
         --i;
       }
     }
