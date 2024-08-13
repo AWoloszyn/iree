@@ -153,7 +153,7 @@ static iree_status_t iree_hal_cuda_semaphore_signal(
   // Advance the deferred work queue if possible. This also must happen
   // outside the lock to avoid nesting.
   iree_status_t status =
-      iree_hal_deferred_work_queue_actions_issue(semaphore->work_queue);
+      iree_hal_deferred_work_queue_issue(semaphore->work_queue);
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -191,7 +191,7 @@ static void iree_hal_cuda_semaphore_fail(iree_hal_semaphore_t* base_semaphore,
 
   // Advance the deferred work queue if possible. This also must happen
   // outside the lock to avoid nesting.
-  status = iree_hal_deferred_work_queue_actions_issue(semaphore->work_queue);
+  status = iree_hal_deferred_work_queue_issue(semaphore->work_queue);
   iree_status_ignore(status);
 
   IREE_TRACE_ZONE_END(z0);

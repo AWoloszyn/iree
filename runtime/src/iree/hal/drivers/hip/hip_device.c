@@ -96,7 +96,8 @@ static const iree_hal_deferred_work_queue_symbol_table_vtable_t
 static_assert(sizeof(hipEvent_t) <= sizeof(void*), "Unexpected event size");
 typedef struct iree_hal_hip_deferred_work_queue_symbol_table_t {
   iree_hal_deferred_work_queue_symbol_table_t base;
-  hipDevice_t device;
+  iree_hal_device_t* device;
+  hipDevice_t hip_device;
   hipCtx_t hip_context;
   hipStream_t dispatch_hip_stream;
   iree_allocator_t host_allocator;
@@ -115,7 +116,7 @@ iree_status_t iree_hal_hip_deferred_work_queue_symbol_table_bind_to_thread(
   iree_hal_hip_deferred_work_queue_symbol_table_t* table =
       (iree_hal_hip_deferred_work_queue_symbol_table_t*)(symbol_table);
   return IREE_HIP_RESULT_TO_STATUS(table->hip_symbols,
-                                   hipCtxSetCurrent(&table->hip_context),
+                                   hipCtxSetCurrent(table->hip_context),
                                    "hipCtxSetCurrent");
 }
 
@@ -123,10 +124,10 @@ iree_status_t iree_hal_hip_deferred_work_queue_symbol_table_wait_native_event(
     iree_hal_deferred_work_queue_symbol_table_t* symbol_table, void* event) {
   iree_hal_hip_deferred_work_queue_symbol_table_t* table =
       (iree_hal_hip_deferred_work_queue_symbol_table_t*)(symbol_table);
-  hipEvent_t hip_event = (hipEvent_t)(hip_event);
+  hipEvent_t hip_event = (hipEvent_t)(event);
   return IREE_HIP_RESULT_TO_STATUS(
       table->hip_symbols,
-      hipStreamWaitEvent(&table->dispatch_hip_stream, hip_event, 0),
+      hipStreamWaitEvent(table->dispatch_hip_stream, hip_event, 0),
       "hipStreamWaitEvent");
 }
 
@@ -180,8 +181,8 @@ iree_hal_hip_deferred_work_queue_symbol_table_semaphore_acquire_timepoint_device
 bool iree_hal_hip_deferred_work_queue_symbol_table_acquire_host_wait_event(
     iree_hal_deferred_work_queue_symbol_table_t* symbol_table,
     struct iree_hal_semaphore_t* semaphore, uint64_t value, void** out_event) {
-  hipEvent_t* out = (hipEvent_t*)(out_event);
-  return iree_hal_hip_semaphore_acquire_event_host_wait(semaphore, value, out);
+  return iree_hal_hip_semaphore_acquire_event_host_wait(
+      semaphore, value, (iree_hal_hip_event_t**)out_event);
 }
 
 void iree_hal_hip_deferred_work_queue_symbol_table_release_wait_event(
@@ -221,8 +222,8 @@ iree_hal_hip_deferred_work_queue_symbol_table_submit_command_buffer(
     hipGraphExec_t exec =
         iree_hal_hip_graph_command_buffer_handle(command_buffer);
     status = IREE_HIP_RESULT_TO_STATUS(
-        table->hip_symbols, cuGraphLaunch(exec, table->dispatch_hip_stream));
-    if (LIKELY(iree_status_is_ok(status))) {
+        table->hip_symbols, hipGraphLaunch(exec, table->dispatch_hip_stream));
+    if (IREE_LIKELY(iree_status_is_ok(status))) {
       iree_hal_hip_graph_tracing_notify_submitted_commands(command_buffer);
     }
   }
@@ -296,20 +297,22 @@ static iree_status_t iree_hal_hip_device_create_internal(
   iree_hal_hip_deferred_work_queue_symbol_table_t* symbol_table;
   iree_status_t status = iree_allocator_malloc(
       host_allocator, sizeof(iree_hal_hip_deferred_work_queue_symbol_table_t),
-      &symbol_table);
+      (void**)&symbol_table);
   if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
     iree_hal_device_release((iree_hal_device_t*)device);
     return status;
   }
   symbol_table->base._vtable =
       &iree_hal_hip_deferred_work_queue_symbols_table_vtable;
-  symbol_table->cu_context = context;
+  symbol_table->hip_context = context;
   symbol_table->hip_symbols = symbols;
-  symbol_table->device = hip_device;
+  symbol_table->device = (iree_hal_device_t*)device;
+  symbol_table->hip_device = hip_device;
   symbol_table->dispatch_hip_stream = dispatch_stream;
   symbol_table->host_allocator = host_allocator;
   status = iree_hal_deferred_work_queue_create(
-      symbol_table, &device->block_pool, host_allocator, &device->work_queue);
+      (iree_hal_deferred_work_queue_symbol_table_t*)symbol_table,
+      &device->block_pool, host_allocator, &device->work_queue);
 
   // Enable tracing for the (currently only) stream - no-op if disabled.
   if (iree_status_is_ok(status) && device->params.stream_tracing) {
@@ -934,7 +937,7 @@ static iree_status_t iree_hal_hip_device_queue_execute(
       command_buffer_count, command_buffers, binding_tables);
   if (iree_status_is_ok(status)) {
     // Try to advance the deferred work queue.
-    status = iree_hal_deferred_work_queue_actions_issue(device->work_queue);
+    status = iree_hal_deferred_work_queue_issue(device->work_queue);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -946,8 +949,7 @@ static iree_status_t iree_hal_hip_device_queue_flush(
   iree_hal_hip_device_t* device = iree_hal_hip_device_cast(base_device);
   IREE_TRACE_ZONE_BEGIN(z0);
   // Try to advance the deferred work queue.
-  iree_status_t status =
-      iree_hal_deferred_work_queue_actions_issue(device->work_queue);
+  iree_status_t status = iree_hal_deferred_work_queue_issue(device->work_queue);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

@@ -104,7 +104,7 @@ static void iree_hal_deferred_work_queue_action_clear_events(
     iree_hal_deferred_work_queue_action_t* action) {
   for (iree_host_size_t i = 0; i < action->event_count; ++i) {
     action->symbols->_vtable->release_wait_event(action->symbols,
-                                                 action->events[i])
+                                                 action->wait_events[i]);
   }
   action->event_count = 0;
 }
@@ -312,7 +312,7 @@ static void iree_hal_deferred_work_queue_completion_list_initialize(
 
 static void iree_hal_deferred_work_queue_completion_list_deinitialize(
     iree_hal_deferred_work_queue_completion_list_t* list,
-    const iree_hal_deferred_work_queue_symbol_table_t* symbols,
+    iree_hal_deferred_work_queue_symbol_table_t* symbols,
     iree_allocator_t host_allocator) {
   iree_hal_deferred_work_queue_completion_list_node_t* head = list->head;
   while (head) {
@@ -418,7 +418,7 @@ static void iree_hal_deferred_work_queue_working_area_deinitialize(
 
 static void iree_hal_deferred_work_queue_completion_area_initialize(
     iree_allocator_t host_allocator,
-    const iree_hal_deferred_work_queue_symbol_table_t* symbols,
+    iree_hal_deferred_work_queue_symbol_table_t* symbols,
     iree_hal_deferred_work_queue_completion_area_t* completion_area) {
   iree_notification_initialize(&completion_area->state_notification);
   iree_hal_deferred_work_queue_completion_list_initialize(
@@ -430,7 +430,7 @@ static void iree_hal_deferred_work_queue_completion_area_initialize(
 
 static void iree_hal_deferred_work_queue_completion_area_deinitialize(
     iree_hal_deferred_work_queue_completion_area_t* completion_area,
-    const iree_hal_deferred_work_queue_symbol_table_t* symbols,
+    iree_hal_deferred_work_queue_symbol_table_t* symbols,
     iree_allocator_t host_allocator) {
   iree_hal_deferred_work_queue_completion_list_deinitialize(
       &completion_area->completion_list, symbols, host_allocator);
@@ -459,7 +459,7 @@ struct iree_hal_deferred_work_queue_t {
   iree_arena_block_pool_t* block_pool;
 
   // The symbols used to interact with the native driver.
-  const iree_hal_deferred_work_queue_symbol_table_t* symbols;
+  iree_hal_deferred_work_queue_symbol_table_t* symbols;
 
   // Non-recursive mutex guarding access.
   iree_slim_mutex_t action_mutex;
@@ -502,8 +502,8 @@ struct iree_hal_deferred_work_queue_t {
   bool exit_requested IREE_GUARDED_BY(action_mutex);
 };
 
-iree_status_t iree_hal_deferred_work_queue_actions_create(
-    const iree_hal_deferred_work_queue_symbol_table_t* symbols,
+iree_status_t iree_hal_deferred_work_queue_create(
+    iree_hal_deferred_work_queue_symbol_table_t* symbols,
     iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
     iree_hal_deferred_work_queue_t** out_actions) {
   IREE_ASSERT_ARGUMENT(symbols);
@@ -553,7 +553,7 @@ iree_status_t iree_hal_deferred_work_queue_actions_create(
   if (iree_status_is_ok(status)) {
     *out_actions = actions;
   } else {
-    iree_hal_deferred_work_queue_destroy((iree_hal_resource_t*)actions);
+    iree_hal_deferred_work_queue_destroy(actions);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -660,7 +660,7 @@ static void iree_hal_deferred_work_queue_decrement_work_items_count(
   iree_slim_mutex_unlock(&actions->action_mutex);
 }
 
-iree_status_t iree_hal_deferred_work_queue_enqueue_execution(
+iree_status_t iree_hal_deferred_work_queue_enque(
     iree_hal_deferred_work_queue_t* actions,
     iree_hal_deferred_work_queue_cleanup_callback_t cleanup_callback,
     void* callback_user_data,
@@ -988,7 +988,7 @@ static iree_status_t iree_hal_deferred_work_queue_issue_execution(
   IREE_ASSERT_EQ(action->kind, IREE_HAL_QUEUE_ACTION_TYPE_EXECUTION);
   IREE_ASSERT_EQ(action->is_pending, false);
   iree_hal_deferred_work_queue_t* actions = action->owning_actions;
-  const iree_hal_deferred_work_queue_symbol_table_t* symbols = actions->symbols;
+  iree_hal_deferred_work_queue_symbol_table_t* symbols = actions->symbols;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // No need to lock given that this action is already detched from the pending

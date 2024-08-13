@@ -56,7 +56,7 @@ typedef struct iree_hal_deferred_work_queue_symbol_table_t {
 } iree_hal_deferred_work_queue_symbol_table_t;
 
 iree_status_t iree_hal_deferred_work_queue_create(
-    const iree_hal_deferred_work_queue_symbol_table_t* symbols,
+    iree_hal_deferred_work_queue_symbol_table_t* symbols,
     iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
     iree_hal_deferred_work_queue_t** out_queue);
 
@@ -76,7 +76,7 @@ iree_status_t iree_hal_deferred_work_queue_enque(
     iree_hal_command_buffer_t* const* command_buffers,
     iree_hal_buffer_binding_table_t const* binding_tables);
 
-iree_status_t iree_hal_deferred_work_queue_actions_issue(
+iree_status_t iree_hal_deferred_work_queue_issue(
     iree_hal_deferred_work_queue_t* deferred_work_queue);
 
 #ifdef __cplusplus
