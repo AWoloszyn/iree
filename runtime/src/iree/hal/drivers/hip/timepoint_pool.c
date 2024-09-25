@@ -19,7 +19,7 @@
 #include "iree/hal/drivers/hip/event_pool.h"
 #include "iree/hal/drivers/hip/status_util.h"
 #include "iree/hal/utils/semaphore_base.h"
-
+#define IREE_HAL_HIP_MAX_MULTIDEVICE_COUNT 64
 //===----------------------------------------------------------------------===//
 // iree_hal_hip_timepoint_t
 //===----------------------------------------------------------------------===//
@@ -76,8 +76,11 @@ struct iree_hal_hip_timepoint_pool_t {
 
   // The pool to acquire host events.
   iree_event_pool_t* host_event_pool;
-  // The pool to acquire device events. Internally synchronized.
-  iree_hal_hip_event_pool_t* device_event_pool;
+
+
+  uint64_t num_event_pools;
+  // The pools to acquire device events. Internally synchronized.
+  iree_hal_hip_event_pool_t* device_event_pools[IREE_HAL_HIP_MAX_MULTIDEVICE_COUNT];
 
   // Note that the above pools are internally synchronized; so we don't and
   // shouldn't use the following mutex to guard access to them.
@@ -101,12 +104,15 @@ struct iree_hal_hip_timepoint_pool_t {
 
 iree_status_t iree_hal_hip_timepoint_pool_allocate(
     iree_event_pool_t* host_event_pool,
-    iree_hal_hip_event_pool_t* device_event_pool,
+    uint64_t num_device_event_pools,
+    iree_hal_hip_event_pool_t** device_event_pools,
     iree_host_size_t available_capacity, iree_allocator_t host_allocator,
     iree_hal_hip_timepoint_pool_t** out_timepoint_pool) {
   IREE_ASSERT_ARGUMENT(host_event_pool);
-  IREE_ASSERT_ARGUMENT(device_event_pool);
+  IREE_ASSERT_ARGUMENT(device_event_pools);
   IREE_ASSERT_ARGUMENT(out_timepoint_pool);
+  IREE_ASSERT_ARGUMENT(num_device_event_pools <= IREE_HAL_HIP_MAX_MULTIDEVICE_COUNT);
+  IREE_ASSERT_ARGUMENT(num_device_event_pools > 0);
   *out_timepoint_pool = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -119,8 +125,9 @@ iree_status_t iree_hal_hip_timepoint_pool_allocate(
                                 (void**)&timepoint_pool));
   timepoint_pool->host_allocator = host_allocator;
   timepoint_pool->host_event_pool = host_event_pool;
-  timepoint_pool->device_event_pool = device_event_pool;
-
+  timepoint_pool->num_event_pools = num_device_event_pools;
+  memcpy(&timepoint_pool->device_event_pools[0], device_event_pools, num_device_event_pools * sizeof( iree_hal_hip_event_pool_t*));
+  
   iree_slim_mutex_initialize(&timepoint_pool->timepoint_mutex);
   timepoint_pool->available_capacity = available_capacity;
   timepoint_pool->available_count = 0;
@@ -238,16 +245,20 @@ iree_status_t iree_hal_hip_timepoint_pool_acquire_host_wait(
 
 iree_status_t iree_hal_hip_timepoint_pool_acquire_device_signal(
     iree_hal_hip_timepoint_pool_t* timepoint_pool,
+    uint64_t device_index,
     iree_host_size_t timepoint_count,
     iree_hal_hip_timepoint_t** out_timepoints) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (device_index > timepoint_pool->num_event_pools) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "Device index is out of bounds");
+  }
 
   // Acquire device events to wrap up. This should happen before acquiring the
   // timepoints to avoid nested locks.
   iree_hal_hip_event_t** device_events = iree_alloca(
       timepoint_count * sizeof((*out_timepoints)->timepoint.device_signal));
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_hip_event_pool_acquire(timepoint_pool->device_event_pool,
+      z0, iree_hal_hip_event_pool_acquire(timepoint_pool->device_event_pools[device_index],
                                           timepoint_count, device_events));
 
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -256,32 +267,6 @@ iree_status_t iree_hal_hip_timepoint_pool_acquire_device_signal(
   for (iree_host_size_t i = 0; i < timepoint_count; ++i) {
     out_timepoints[i]->kind = IREE_HAL_HIP_TIMEPOINT_KIND_DEVICE_SIGNAL;
     out_timepoints[i]->timepoint.device_signal = device_events[i];
-  }
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
-}
-
-iree_status_t iree_hal_hip_timepoint_pool_acquire_device_wait(
-    iree_hal_hip_timepoint_pool_t* timepoint_pool,
-    iree_host_size_t timepoint_count,
-    iree_hal_hip_timepoint_t** out_timepoints) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Acquire device events to wrap up. This should happen before acquiring the
-  // timepoints to avoid nested locks.
-  iree_hal_hip_event_t** device_events = iree_alloca(
-      timepoint_count * sizeof((*out_timepoints)->timepoint.device_wait));
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_hip_event_pool_acquire(timepoint_pool->device_event_pool,
-                                          timepoint_count, device_events));
-
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_hip_timepoint_pool_acquire_internal(
-              timepoint_pool, timepoint_count, out_timepoints));
-  for (iree_host_size_t i = 0; i < timepoint_count; ++i) {
-    out_timepoints[i]->kind = IREE_HAL_HIP_TIMEPOINT_KIND_DEVICE_WAIT;
-    out_timepoints[i]->timepoint.device_wait = device_events[i];
   }
 
   IREE_TRACE_ZONE_END(z0);
