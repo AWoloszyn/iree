@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/tracing.h"
 #include "iree/hal/drivers/hip/native_executable.h"
+#define MAX_EXECUTABLE_CACHE_DEVICE_COUNT 64
 
 typedef struct iree_hal_hip_nop_executable_cache_t {
   // Abstract resource used for injecting reference counting and vtable;
@@ -22,7 +23,10 @@ typedef struct iree_hal_hip_nop_executable_cache_t {
 
   const iree_hal_hip_dynamic_symbols_t* symbols;
 
-  hipDevice_t device;
+  uint32_t num_devices;
+  hipDevice_t devices[64];
+  hipCtx_t contexts[64];
+  
 } iree_hal_hip_nop_executable_cache_t;
 
 static const iree_hal_executable_cache_vtable_t
@@ -37,11 +41,16 @@ iree_hal_hip_nop_executable_cache_cast(
 
 iree_status_t iree_hal_hip_nop_executable_cache_create(
     iree_string_view_t identifier,
-    const iree_hal_hip_dynamic_symbols_t* symbols, hipDevice_t device,
+    const iree_hal_hip_dynamic_symbols_t* symbols, uint32_t num_devices,
+    hipDevice_t* devices,
+    hipCtx_t* contexts,
     iree_allocator_t host_allocator,
     iree_hal_executable_cache_t** out_executable_cache) {
   IREE_ASSERT_ARGUMENT(symbols);
   IREE_ASSERT_ARGUMENT(out_executable_cache);
+  if (num_devices < 1 || num_devices > MAX_EXECUTABLE_CACHE_DEVICE_COUNT) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "Need between 1 and %d devices", MAX_EXECUTABLE_CACHE_DEVICE_COUNT);
+  }
   IREE_TRACE_ZONE_BEGIN(z0);
 
   *out_executable_cache = NULL;
@@ -54,7 +63,10 @@ iree_status_t iree_hal_hip_nop_executable_cache_create(
                                &executable_cache->resource);
   executable_cache->host_allocator = host_allocator;
   executable_cache->symbols = symbols;
-  executable_cache->device = device;
+
+  executable_cache->num_devices = num_devices;  
+  memcpy(executable_cache->devices, devices, sizeof(hipDevice_t) * num_devices);
+  memcpy(executable_cache->contexts, contexts, sizeof(hipCtx_t) * num_devices);
 
   *out_executable_cache = (iree_hal_executable_cache_t*)executable_cache;
 
@@ -89,7 +101,8 @@ static iree_status_t iree_hal_hip_nop_executable_cache_prepare_executable(
   iree_hal_hip_nop_executable_cache_t* executable_cache =
       iree_hal_hip_nop_executable_cache_cast(base_executable_cache);
   return iree_hal_hip_native_executable_create(
-      executable_cache->symbols, executable_cache->device, executable_params,
+      executable_cache->symbols, executable_cache->num_devices, executable_cache->devices, 
+      executable_cache->contexts, executable_params,
       executable_cache->host_allocator, out_executable);
 }
 
