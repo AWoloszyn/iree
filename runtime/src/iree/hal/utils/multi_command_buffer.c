@@ -19,49 +19,51 @@ typedef struct iree_hal_multi_command_buffer_t {
   uint64_t num_command_buffers;
   iree_hal_command_buffer_t* child_buffers[IREE_HAL_MAX_MULTIDEVICE_COUNT];
   iree_utils_multi_command_buffer_interface_t* interface;
-  
+
 } iree_hal_multi_command_buffer_t;
 
 static const iree_hal_command_buffer_vtable_t
     iree_hal_multi_command_buffer_vtable;
 
-static iree_hal_multi_command_buffer_t*
-iree_hal_multi_command_buffer_cast(iree_hal_command_buffer_t* base_value) {
+static iree_hal_multi_command_buffer_t* iree_hal_multi_command_buffer_cast(
+    iree_hal_command_buffer_t* base_value) {
   IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_multi_command_buffer_vtable);
   return (iree_hal_multi_command_buffer_t*)base_value;
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_multi_command_buffer_create(
     iree_allocator_t host_allocator,
-    uint64_t num_command_buffers,
-    iree_hal_command_buffer_t* in_command_buffers[IREE_HAL_MAX_MULTIDEVICE_COUNT],
+    iree_hal_command_buffer_t*
+        in_command_buffers[IREE_HAL_MAX_MULTIDEVICE_COUNT],
     iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
     iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
     iree_utils_multi_command_buffer_interface_t* interface,
     iree_hal_command_buffer_t** out_command_buffer) {
-  IREE_ASSERT_ARGUMENT(block_pool);
   IREE_ASSERT_ARGUMENT(out_command_buffer);
   *out_command_buffer = NULL;
-  
+
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_multi_command_buffer_t* command_buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       iree_allocator_malloc(host_allocator,
-                            sizeof(*command_buffer)+
+                            sizeof(*command_buffer) +
                                 iree_hal_command_buffer_validation_state_size(
                                     mode, binding_capacity),
                             (void**)&command_buffer));
-  iree_hal_command_buffer_initialize(host_allocator,
-    device_allocator, mode, command_categories, queue_affinity, binding_capacity, &iree_hal_multi_command_buffer_vtable, &command_buffer);
+  iree_hal_command_buffer_initialize(
+      device_allocator, mode, command_categories, queue_affinity,
+      binding_capacity, (uint8_t*)command_buffer + sizeof(*command_buffer),
+      &iree_hal_multi_command_buffer_vtable, &command_buffer->base);
   for (uint16_t i = 0; i < IREE_HAL_MAX_MULTIDEVICE_COUNT; ++i) {
-    command_buffer->child_buffers[i] = (queue_affinity & (1 << i))? in_command_buffers[i]: NULL;
+    command_buffer->child_buffers[i] =
+        (queue_affinity & (1 << i)) ? in_command_buffers[i] : NULL;
   }
   command_buffer->interface = interface;
-  command_buffer->num_command_buffers = num_command_buffers;
-  
+  command_buffer->num_command_buffers = IREE_HAL_MAX_MULTIDEVICE_COUNT;
+
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -85,20 +87,23 @@ IREE_API_EXPORT bool iree_hal_multi_command_buffer_isa(
                               &iree_hal_multi_command_buffer_vtable);
 }
 
-#define CALL_COMMAND(status, command) \
-  iree_hal_queue_affinity_t a = command_buffer->base.queue_affinity; \
-  uint64_t num = 0; \
-  while(a && IREE_LIKELY(iree_status_is_ok(status))) { \
-   uint64_t ct = iree_math_count_trailing_zeros_u64(a);
-    num += iree_math_count_trailing_zeros_u64(a);
-    status = command_buffer->interface->vtable->push_command_buffer_context(command_buffer->interface, num);
-    if (!iree_status_is_ok(status)) {
-      break;
-    }
-    status = command;
-    a >>= (ct + 1);
-    num += 1;
-    status = iree_status_join(status, command_buffer->interface->vtable->pop_command_buffer_context(command_buffer->interface);)
+#define CALL_COMMAND(status, command)                                          \
+  iree_hal_queue_affinity_t a = command_buffer->base.queue_affinity;           \
+  uint64_t num = 0;                                                            \
+  while (a && IREE_LIKELY(iree_status_is_ok(status))) {                        \
+    uint64_t ct = iree_math_count_trailing_zeros_u64(a);                       \
+    num += iree_math_count_trailing_zeros_u64(a);                              \
+    status = command_buffer->interface->vtable->push_command_buffer_context(   \
+        command_buffer->interface, num);                                       \
+    if (!iree_status_is_ok(status)) {                                          \
+      break;                                                                   \
+    }                                                                          \
+    status = command;                                                          \
+    a >>= (ct + 1);                                                            \
+    num += 1;                                                                  \
+    status = iree_status_join(                                                 \
+        status, command_buffer->interface->vtable->pop_command_buffer_context( \
+                    command_buffer->interface);)                               \
   }
 
 static iree_status_t iree_hal_multi_command_buffer_begin(
@@ -106,7 +111,8 @@ static iree_status_t iree_hal_multi_command_buffer_begin(
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_command_buffer_begin(command_buffer->child_buffers[num]));
+  CALL_COMMAND(status, iree_hal_command_buffer_begin(
+                           command_buffer->child_buffers[num]));
   return status;
 }
 
@@ -115,7 +121,8 @@ static iree_status_t iree_hal_multi_command_buffer_end(
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_command_buffer_end(command_buffer->child_buffers[num]));
+  CALL_COMMAND(status,
+               iree_hal_command_buffer_end(command_buffer->child_buffers[num]));
   return status;
 }
 
@@ -131,9 +138,11 @@ static iree_status_t iree_hal_multi_command_buffer_execution_barrier(
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_multi_command_buffer_execution_barrier(command_buffer->child_buffers[num],
-      source_stage_mask,target_stage_mask, flags, memory_barrier_count, memory_barriers, buffer_barrier_count, buffer_barriers
-    ));
+  CALL_COMMAND(status,
+               iree_hal_multi_command_buffer_execution_barrier(
+                   command_buffer->child_buffers[num], source_stage_mask,
+                   target_stage_mask, flags, memory_barrier_count,
+                   memory_barriers, buffer_barrier_count, buffer_barriers));
   return status;
 }
 
@@ -143,7 +152,9 @@ static iree_status_t iree_hal_multi_command_buffer_signal_event(
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_command_buffer_signal_event(command_buffer->child_buffers[num], event, source_stage_mask));
+  CALL_COMMAND(status, iree_hal_command_buffer_signal_event(
+                           command_buffer->child_buffers[num], event,
+                           source_stage_mask));
   return status;
 }
 
@@ -153,7 +164,9 @@ static iree_status_t iree_hal_multi_command_buffer_reset_event(
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_command_buffer_reset_event(command_buffer->child_buffers[num], event, source_stage_mask));
+  CALL_COMMAND(status, iree_hal_command_buffer_reset_event(
+                           command_buffer->child_buffers[num], event,
+                           source_stage_mask));
   return status;
 }
 
@@ -169,7 +182,11 @@ static iree_status_t iree_hal_multi_command_buffer_wait_events(
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_command_buffer_wait_events(command_buffer->child_buffers[num], event_count, events, source_stage_mask, target_stage_mask, memory_barrier_count, memory_barriers, buffer_barrier_count, buffer_barriers));
+  CALL_COMMAND(status,
+               iree_hal_command_buffer_wait_events(
+                   command_buffer->child_buffers[num], event_count, events,
+                   source_stage_mask, target_stage_mask, memory_barrier_count,
+                   memory_barriers, buffer_barrier_count, buffer_barriers));
   return status;
 }
 
@@ -179,7 +196,8 @@ static iree_status_t iree_hal_multi_command_buffer_discard_buffer(
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_command_buffer_discard_buffer(command_buffer->child_buffers[num], buffer_ref));
+  CALL_COMMAND(status, iree_hal_command_buffer_discard_buffer(
+                           command_buffer->child_buffers[num], buffer_ref));
   return status;
 }
 
@@ -190,7 +208,9 @@ static iree_status_t iree_hal_multi_command_buffer_fill_buffer(
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_command_buffer_fill_buffer(command_buffer->child_buffers[num], target_ref, pattern, pattern_length));
+  CALL_COMMAND(status, iree_hal_command_buffer_fill_buffer(
+                           command_buffer->child_buffers[num], target_ref,
+                           pattern, pattern_length));
   return status;
 }
 
@@ -201,7 +221,9 @@ static iree_status_t iree_hal_multi_command_buffer_update_buffer(
       iree_hal_multi_command_buffer_cast(base_command_buffer);
   iree_hal_queue_affinity_t a = command_buffer->base.queue_affinity;
   iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_command_buffer_update_buffer(command_buffer->child_buffers[num], source_buffer, source_offset, target_ref));
+  CALL_COMMAND(status, iree_hal_command_buffer_update_buffer(
+                           command_buffer->child_buffers[num], source_buffer,
+                           source_offset, target_ref));
   return status;
 }
 
@@ -211,9 +233,11 @@ static iree_status_t iree_hal_multi_command_buffer_copy_buffer(
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_command_buffer_copy_buffer(command_buffer->child_buffers[num], source_ref, target_ref));
-  }
-  return status;
+  CALL_COMMAND(status,
+               iree_hal_command_buffer_copy_buffer(
+                   command_buffer->child_buffers[num], source_ref, target_ref));
+}
+return status;
 }
 
 static iree_status_t iree_hal_multi_command_buffer_collective(
@@ -223,7 +247,9 @@ static iree_status_t iree_hal_multi_command_buffer_collective(
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_command_buffer_collective(command_buffer->child_buffers[num], channel, op, param, send_ref, recv_ref, element_count));
+  CALL_COMMAND(status, iree_hal_command_buffer_collective(
+                           command_buffer->child_buffers[num], channel, op,
+                           param, send_ref, recv_ref, element_count));
   return status;
 }
 
@@ -235,7 +261,10 @@ static iree_status_t iree_hal_multi_command_buffer_dispatch(
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_command_buffer_dispatch(command_buffer->child_buffers[num], executable, entry_point, workgroup_count, constants, bindings, flags));
+  CALL_COMMAND(status,
+               iree_hal_command_buffer_dispatch(
+                   command_buffer->child_buffers[num], executable, entry_point,
+                   workgroup_count, constants, bindings, flags));
   return status;
 }
 
@@ -247,17 +276,21 @@ static iree_status_t iree_hal_multi_command_buffer_dispatch_indirect(
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
-  CALL_COMMAND(status, iree_hal_command_buffer_dispatch_indirect(command_buffer->child_buffers[num], executable, entry_point, workgroups_ref, constants, bindings, flags));
+  CALL_COMMAND(status,
+               iree_hal_command_buffer_dispatch_indirect(
+                   command_buffer->child_buffers[num], executable, entry_point,
+                   workgroups_ref, constants, bindings, flags));
   return status;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_multi_command_buffer_get(uint32_t index,
-    iree_hal_command_buffer_t* out_command_buffer) {
+IREE_API_EXPORT iree_status_t iree_hal_multi_command_buffer_get(
+    uint32_t index, iree_hal_command_buffer_t* out_command_buffer) {
   if (index > IREE_HAL_MAX_MULTIDEVICE_COUNT) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "Invalid device index %d", index);
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "Invalid device index %d",
+                            index);
   }
   iree_hal_multi_command_buffer_t* command_buffer =
-    iree_hal_multi_command_buffer_cast(base_command_buffer);
+      iree_hal_multi_command_buffer_cast(base_command_buffer);
   return command_buffer->child_buffers[index];
 }
 
@@ -278,6 +311,5 @@ static const iree_hal_command_buffer_vtable_t
         .dispatch = iree_hal_multi_command_buffer_dispatch,
         .dispatch_indirect = iree_hal_multi_command_buffer_dispatch_indirect,
 };
-
 
 #undef CALL_COMMAND
