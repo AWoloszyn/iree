@@ -184,6 +184,21 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    multi_command_buffer
+  HDRS
+    "multi_command_buffer.h"
+  SRCS
+    "multi_command_buffer.c"
+  DEPS
+    ::libmpi
+    iree::base::internal
+    iree::base::internal::arena
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     resource_set
   HDRS
     "resource_set.h"
