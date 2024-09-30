@@ -24,6 +24,7 @@ iree_hal_cts_test_suite(
     # https://github.com/iree-org/iree/pull/17080#discussion_r1569867998
     "semaphore_submission"
     "semaphore"
+    "multidevice_driver" # Multidevice not supported yet
   LABELS
     driver=metal
 )

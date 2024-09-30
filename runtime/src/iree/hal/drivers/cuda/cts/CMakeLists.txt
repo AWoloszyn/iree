@@ -23,7 +23,8 @@ iree_hal_cts_test_suite(
     iree::hal::drivers::cuda::registration
   EXCLUDED_TESTS
     # HAL event is unimplemented for now.
-    "event"
+    "event",
+    "multidevice_driver"
   LABELS
     driver=cuda
     requires-gpu-nvidia
@@ -48,7 +49,8 @@ iree_hal_cts_test_suite(
     iree::hal::drivers::cuda::registration
   EXCLUDED_TESTS
     # HAL event is unimplemented for now.
-    "event"
+    "event",
+    "multidevice_driver"
   LABELS
     driver=cuda
     requires-gpu-nvidia

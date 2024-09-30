@@ -14,6 +14,7 @@ set(IREE_ALL_CTS_TESTS
   "command_buffer_fill_buffer"
   "command_buffer_update_buffer"
   "driver"
+  "multidevice_driver"
   "event"
   "executable_cache"
   "file"
@@ -201,6 +202,19 @@ iree_cc_library(
     file_test_library
   HDRS
     "file_test.h"
+  DEPS
+    ::cts_test_base
+    iree::base
+    iree::hal
+    iree::testing::gtest
+  TESTONLY
+)
+
+iree_cc_library(
+  NAME
+    multidevice_driver_test_library
+  HDRS
+    "multidevice_driver_test.h"
   DEPS
     ::cts_test_base
     iree::base

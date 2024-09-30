@@ -36,6 +36,7 @@ iree_hal_cts_test_suite(
     iree::hal::drivers::vulkan::registration
   EXCLUDED_TESTS
     "semaphore_submission"  # SubmitWithWait hangs (requires async)
+    "multidevice_driver" # Multidevice not supported yet
   LABELS
     driver=vulkan
   ARGS

@@ -6,6 +6,7 @@
 
 #ifndef IREE_HAL_DRIVERS_HIP_MULTIDEVICE_H_
 #define IREE_HAL_DRIVERS_HIP_MULTIDEVICE_H_
+#define IREE_HAL_HIP_MAX_MULTIDEVICE_COUNT 64
 
 #include <stdint.h>
 
@@ -25,8 +26,7 @@ iree_status_t iree_hal_hip_multidevice_create(
     const iree_hal_hip_device_params_t* params,
     const iree_hal_hip_dynamic_symbols_t* symbols,
     const iree_hal_hip_nccl_dynamic_symbols_t* nccl_symbols,
-    uint32_t device_count,
-    hipDevice_t* devices,
+    uint32_t device_count, hipDevice_t* devices,
     iree_allocator_t host_allocator, iree_hal_device_t** out_device);
 
 // Returns the HIP context bound to the given |device| if it is a HIP device
