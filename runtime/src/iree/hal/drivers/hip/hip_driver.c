@@ -555,6 +555,9 @@ static iree_status_t iree_hal_hip_driver_create_multidevice_by_path(
   for (iree_host_size_t offs = 0; offs < device_path.size;) {
     iree_host_size_t comma_pos =
         iree_string_view_find_char(device_path, ',', offs);
+    if (comma_pos == IREE_STRING_VIEW_NPOS) {
+      comma_pos = device_path.size;
+    }
     iree_string_view_t this_device_path =
         iree_string_view_substr(device_path, offs, comma_pos - offs);
     IREE_RETURN_IF_ERROR(iree_hal_hip_driver_get_device_id_by_path(

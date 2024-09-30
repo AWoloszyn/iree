@@ -103,7 +103,7 @@ IREE_API_EXPORT bool iree_hal_multi_command_buffer_isa(
     num += 1;                                                                  \
     status = iree_status_join(                                                 \
         status, command_buffer->interface->vtable->pop_command_buffer_context( \
-                    command_buffer->interface);)                               \
+                    command_buffer->interface));                               \
   }
 
 static iree_status_t iree_hal_multi_command_buffer_begin(
@@ -219,7 +219,6 @@ static iree_status_t iree_hal_multi_command_buffer_update_buffer(
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref) {
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
-  iree_hal_queue_affinity_t a = command_buffer->base.queue_affinity;
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status, iree_hal_command_buffer_update_buffer(
                            command_buffer->child_buffers[num], source_buffer,
@@ -236,8 +235,7 @@ static iree_status_t iree_hal_multi_command_buffer_copy_buffer(
   CALL_COMMAND(status,
                iree_hal_command_buffer_copy_buffer(
                    command_buffer->child_buffers[num], source_ref, target_ref));
-}
-return status;
+  return status;
 }
 
 static iree_status_t iree_hal_multi_command_buffer_collective(
@@ -284,14 +282,20 @@ static iree_status_t iree_hal_multi_command_buffer_dispatch_indirect(
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_multi_command_buffer_get(
-    uint32_t index, iree_hal_command_buffer_t* out_command_buffer) {
+    iree_hal_command_buffer_t* base_command_buffer, uint32_t index,
+    iree_hal_command_buffer_t** out_command_buffer) {
   if (index > IREE_HAL_MAX_MULTIDEVICE_COUNT) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "Invalid device index %d",
                             index);
   }
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
-  return command_buffer->child_buffers[index];
+  if (!(command_buffer->base.queue_affinity & (1 << index))) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "No command buffer for device index %d", index);
+  }
+  *out_command_buffer = command_buffer->child_buffers[index];
+  return iree_ok_status();
 }
 
 static const iree_hal_command_buffer_vtable_t
