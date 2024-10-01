@@ -565,11 +565,14 @@ static iree_status_t iree_hal_hip_driver_create_multidevice_by_path(
     offs = comma_pos + 1;
     idx++;
   }
-  if (idx < 2) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Could not create a multidevice with fewer than 2 devices");
-  }
+  // DO NOT CHECK IN, THIS IS FOR TESTING MULTIDEVICE,
+  // UNCOMENT THE FOLLOWING BLOCK.
+  // if (idx < 2) {
+  //  return iree_make_status(
+  //      IREE_STATUS_INVALID_ARGUMENT,
+  //      "Could not create a multidevice with fewer than 2 devices");
+  //}
+
   return iree_hal_hip_driver_create_multidevice_by_ids(
       base_driver, device_ids, idx, param_count, params, host_allocator,
       out_device);
@@ -589,19 +592,20 @@ static iree_status_t iree_hal_hip_driver_create_device_by_path(
         host_allocator, out_device);
   }
 
-  iree_host_size_t comma_pos = iree_string_view_find_char(device_path, ',', 0);
-
-  if (comma_pos != IREE_STRING_VIEW_NPOS && comma_pos != device_path.size - 1) {
-    return iree_hal_hip_driver_create_multidevice_by_path(
-        base_driver, driver_name, device_path, param_count, params,
-        host_allocator, out_device);
-  }
-
-  iree_hal_device_id_t id;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_hip_driver_get_device_id_by_path(base_driver, device_path, &id));
-  return iree_hal_hip_driver_create_device_by_id(
-      base_driver, id, param_count, params, host_allocator, out_device);
+  // if (iree_string_view_find_char(device_path, ',', 0) !=
+  // IREE_STRING_VIEW_NPOS) {
+  return iree_hal_hip_driver_create_multidevice_by_path(
+      base_driver, driver_name, device_path, param_count, params,
+      host_allocator, out_device);
+  //}
+  // DO NOT CHECK IN, THIS IS JUST FOR TESTING MULTIDEVICE UNCOMMENT THE NEXT
+  // BLOCK AND THE IF ABOVE
+  /*
+    iree_hal_device_id_t id;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_hip_driver_get_device_id_by_path(base_driver, device_path,
+    &id)); return iree_hal_hip_driver_create_device_by_id( base_driver, id,
+    param_count, params, host_allocator, out_device);*/
 }
 
 static const iree_hal_driver_vtable_t iree_hal_hip_driver_vtable = {

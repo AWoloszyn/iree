@@ -63,7 +63,7 @@ IREE_API_EXPORT iree_status_t iree_hal_multi_command_buffer_create(
   }
   command_buffer->interface = interface;
   command_buffer->num_command_buffers = IREE_HAL_MAX_MULTIDEVICE_COUNT;
-
+  *out_command_buffer = (iree_hal_command_buffer_t*)command_buffer;
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }

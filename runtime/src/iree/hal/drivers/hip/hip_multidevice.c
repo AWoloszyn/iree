@@ -280,6 +280,7 @@ iree_hal_hip_deferred_work_queue_device_interface_submit_command_buffer(
   iree_hal_hip_deferred_work_queue_multidevice_interface_t* table =
       (iree_hal_hip_deferred_work_queue_multidevice_interface_t*)(device_interface);
   iree_status_t status = iree_ok_status();
+
   if (iree_hal_hip_stream_command_buffer_isa(command_buffer)) {
     // Stream command buffer so nothing to do but notify it was submitted.
     iree_hal_hip_stream_notify_submitted_commands(command_buffer);
@@ -527,12 +528,23 @@ static iree_status_t iree_hal_hip_multidevice_create_internal(
       tracing_device_interfaces[i]->host_allocator = host_allocator;
       tracing_device_interfaces[i]->hip_symbols = symbols;
 
+      status =
+          IREE_HIP_RESULT_TO_STATUS(symbols, hipCtxPushCurrent(contexts[i]));
+      if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
+        iree_hal_device_release((iree_hal_device_t*)device);
+        return status;
+      }
       status = iree_hal_stream_tracing_context_allocate(
           (iree_hal_stream_tracing_device_interface_t*)
               tracing_device_interfaces[i],
           device->identifier, device->params.stream_tracing,
           &device->block_pool, host_allocator,
           &device->device_contexts[i].tracing_context);
+      status = IREE_HIP_RESULT_TO_STATUS(symbols, hipCtxPopCurrent(NULL));
+      if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
+        iree_hal_device_release((iree_hal_device_t*)device);
+        return status;
+      }
     }
   }
 
@@ -606,6 +618,16 @@ iree_status_t iree_hal_hip_multidevice_create(
       status = IREE_HIP_RESULT_TO_STATUS(
           symbols, hipStreamCreateWithFlags(&hip_dispatch_streams[i],
                                             hipStreamNonBlocking));
+    }
+
+    if (iree_status_is_ok(status)) {
+      for (uint32_t j = 0; j < device_count && iree_status_is_ok(status); ++j) {
+        if (i == j) {
+          continue;
+        }
+        status = IREE_HIP_RESULT_TO_STATUS(
+            symbols, hipDeviceEnablePeerAccess(devices[j], 0));
+      }
     }
   }
 
