@@ -961,6 +961,12 @@ static iree_status_t iree_hal_hip_multidevice_create_command_buffer_internal(
     uint32_t nidx = iree_math_count_trailing_zeros_u64(affinity);
     idx += nidx;
     affinity >>= nidx + 1;
+    status = IREE_HIP_RESULT_TO_STATUS(
+        device->hip_symbols,
+        hipCtxPushCurrent(device->device_contexts[idx].hip_context));
+    if (!iree_status_is_ok(status)) {
+      break;
+    }
     switch (type) {
       case IREE_HAL_HIP_MULTIDEVICE_COMMAND_BUFFER_TYPE_STREAM:
         status = iree_status_join(
@@ -971,7 +977,7 @@ static iree_status_t iree_hal_hip_multidevice_create_command_buffer_internal(
                         command_categories, binding_capacity,
                         device->device_contexts[idx].hip_dispatch_stream,
                         &device->block_pool, device->host_allocator,
-                        (iree_hal_queue_affinity_t)1 << nidx, &buffers[idx]));
+                        (iree_hal_queue_affinity_t)1 << idx, &buffers[idx]));
         break;
       case IREE_HAL_HIP_MULTIDEVICE_COMMAND_BUFFER_TYPE_GRAPH:
         status = iree_status_join(
@@ -980,11 +986,13 @@ static iree_status_t iree_hal_hip_multidevice_create_command_buffer_internal(
                 iree_hal_device_allocator(base_device), device->hip_symbols,
                 device->device_contexts[idx].tracing_context,
                 device->device_contexts[idx].hip_context, mode,
-                command_categories, (iree_hal_queue_affinity_t)1 << nidx,
+                command_categories, (iree_hal_queue_affinity_t)1 << idx,
                 binding_capacity, &device->block_pool, device->host_allocator,
                 &buffers[idx]));
         break;
     }
+    status =
+        IREE_HIP_RESULT_TO_STATUS(device->hip_symbols, hipCtxPopCurrent(NULL));
     ++idx;
   }
 

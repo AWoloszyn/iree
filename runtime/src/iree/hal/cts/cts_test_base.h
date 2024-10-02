@@ -37,6 +37,13 @@ const char* get_test_executable_format();
 // Leaf test binaries must implement this function.
 iree_const_byte_span_t get_test_executable_data(iree_string_view_t file_name);
 
+// Creates a default test device for the given driver under test.
+// Leaf test binaries must implement this function if it differs
+// from iree_hal_driver_create_default_device.
+iree_status_t create_default_test_device(iree_hal_driver_t* driver,
+                                         iree_allocator_t host_allocator,
+                                         iree_hal_device_t** out_device);
+
 enum class RecordingType {
   kDirect = 0,
   kIndirect,
@@ -120,8 +127,8 @@ class CTSTestBase : public BaseType, public CTSTestResources {
     driver_ = driver;
 
     iree_hal_device_t* device = NULL;
-    status = iree_hal_driver_create_default_device(
-        driver_, iree_allocator_system(), &device);
+    status =
+        create_default_test_device(driver_, iree_allocator_system(), &device);
     if (iree_status_is_unavailable(status)) {
       iree_status_ignore(status);
       return;

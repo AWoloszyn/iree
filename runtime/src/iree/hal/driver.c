@@ -175,11 +175,8 @@ IREE_API_EXPORT iree_status_t iree_hal_driver_create_default_device(
   IREE_ASSERT_ARGUMENT(out_device);
   *out_device = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
-  // iree_status_t status = _VTABLE_DISPATCH(driver, create_device_by_id)(
-  //     driver, IREE_HAL_DEVICE_ID_DEFAULT, /*param_count=*/0, /*params=*/NULL,
-  //     host_allocator, out_device);
-  iree_status_t status = _VTABLE_DISPATCH(driver, create_device_by_path)(
-      driver, IREE_SV("hip"), IREE_SV("0"), /*param_count=*/0, /*params=*/NULL,
+  iree_status_t status = _VTABLE_DISPATCH(driver, create_device_by_id)(
+      driver, IREE_HAL_DEVICE_ID_DEFAULT, /*param_count=*/0, /*params=*/NULL,
       host_allocator, out_device);
   IREE_TRACE_ZONE_END(z0);
   return status;
