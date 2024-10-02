@@ -59,7 +59,9 @@ IREE_API_EXPORT iree_status_t iree_hal_multi_command_buffer_create(
       &iree_hal_multi_command_buffer_vtable, &command_buffer->base);
   for (uint16_t i = 0; i < IREE_HAL_MAX_MULTIDEVICE_COUNT; ++i) {
     command_buffer->child_buffers[i] =
-        (queue_affinity & (1 << i)) ? in_command_buffers[i] : NULL;
+        (queue_affinity & ((iree_hal_queue_affinity_t)(1) << i))
+            ? in_command_buffers[i]
+            : NULL;
   }
   command_buffer->interface = interface;
   command_buffer->num_command_buffers = IREE_HAL_MAX_MULTIDEVICE_COUNT;
@@ -290,7 +292,8 @@ IREE_API_EXPORT iree_status_t iree_hal_multi_command_buffer_get(
   }
   iree_hal_multi_command_buffer_t* command_buffer =
       iree_hal_multi_command_buffer_cast(base_command_buffer);
-  if (!(command_buffer->base.queue_affinity & (1 << index))) {
+  if (!(command_buffer->base.queue_affinity &
+        ((iree_hal_queue_affinity_t)1 << index))) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "No command buffer for device index %d", index);
   }

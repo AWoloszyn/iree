@@ -116,7 +116,7 @@ typedef struct iree_hal_hip_multi_command_buffer_interface_t {
 
 static const iree_hal_device_vtable_t iree_hal_hip_multidevice_vtable;
 static const iree_hal_deferred_work_queue_device_interface_vtable_t
-    iree_hal_hip_deferred_work_queue_device_interface_vtable;
+    iree_hal_hip_deferred_work_queue_multidevice_interface_vtable;
 
 // We put a hipEvent_t into a iree_hal_deferred_work_queue_native_event_t.
 static_assert(sizeof(hipEvent_t) <=
@@ -124,7 +124,7 @@ static_assert(sizeof(hipEvent_t) <=
               "Unexpected event size");
 typedef struct iree_hal_hip_deferred_work_queue_multidevice_interface_t {
   iree_hal_deferred_work_queue_device_interface_t base;
-  iree_hal_device_t* device;
+  iree_hal_hip_multidevice_t* device;
   hipDevice_t hip_device;
   hipCtx_t hip_context;
   hipStream_t dispatch_hip_stream;
@@ -133,7 +133,7 @@ typedef struct iree_hal_hip_deferred_work_queue_multidevice_interface_t {
   uint64_t device_index;
 } iree_hal_hip_deferred_work_queue_multidevice_interface_t;
 
-static void iree_hal_hip_deferred_work_queue_device_interface_destroy(
+static void iree_hal_hip_deferred_work_queue_multidevice_interface_destroy(
     iree_hal_deferred_work_queue_device_interface_t* base_device_interface) {
   iree_hal_hip_deferred_work_queue_multidevice_interface_t* device_interface =
       (iree_hal_hip_deferred_work_queue_multidevice_interface_t*)(base_device_interface);
@@ -141,7 +141,7 @@ static void iree_hal_hip_deferred_work_queue_device_interface_destroy(
 }
 
 static iree_status_t
-iree_hal_hip_deferred_work_queue_device_interface_bind_to_thread(
+iree_hal_hip_deferred_work_queue_multidevice_interface_bind_to_thread(
     iree_hal_deferred_work_queue_device_interface_t* base_device_interface) {
   iree_hal_hip_deferred_work_queue_multidevice_interface_t* device_interface =
       (iree_hal_hip_deferred_work_queue_multidevice_interface_t*)(base_device_interface);
@@ -151,7 +151,7 @@ iree_hal_hip_deferred_work_queue_device_interface_bind_to_thread(
 }
 
 static iree_status_t
-iree_hal_hip_deferred_work_queue_device_interface_wait_native_event(
+iree_hal_hip_deferred_work_queue_multidevice_interface_wait_native_event(
     iree_hal_deferred_work_queue_device_interface_t* base_device_interface,
     iree_hal_deferred_work_queue_native_event_t event) {
   iree_hal_hip_deferred_work_queue_multidevice_interface_t* device_interface =
@@ -164,7 +164,7 @@ iree_hal_hip_deferred_work_queue_device_interface_wait_native_event(
 }
 
 static iree_status_t
-iree_hal_hip_deferred_work_queue_device_interface_create_native_event(
+iree_hal_hip_deferred_work_queue_multidevice_interface_create_native_event(
     iree_hal_deferred_work_queue_device_interface_t* base_device_interface,
     iree_hal_deferred_work_queue_native_event_t* out_event) {
   iree_hal_hip_deferred_work_queue_multidevice_interface_t* device_interface =
@@ -174,7 +174,7 @@ iree_hal_hip_deferred_work_queue_device_interface_create_native_event(
                                    "hipEventCreate");
 }
 static iree_status_t
-iree_hal_hip_deferred_work_queue_device_interface_record_native_event(
+iree_hal_hip_deferred_work_queue_multidevice_interface_record_native_event(
     iree_hal_deferred_work_queue_device_interface_t* base_device_interface,
     iree_hal_deferred_work_queue_native_event_t event) {
   iree_hal_hip_deferred_work_queue_multidevice_interface_t* device_interface =
@@ -186,7 +186,7 @@ iree_hal_hip_deferred_work_queue_device_interface_record_native_event(
 }
 
 static iree_status_t
-iree_hal_hip_deferred_work_queue_device_interface_synchronize_native_event(
+iree_hal_hip_deferred_work_queue_multidevice_interface_synchronize_native_event(
     iree_hal_deferred_work_queue_device_interface_t* base_device_interface,
     iree_hal_deferred_work_queue_native_event_t event) {
   iree_hal_hip_deferred_work_queue_multidevice_interface_t* device_interface =
@@ -195,7 +195,7 @@ iree_hal_hip_deferred_work_queue_device_interface_synchronize_native_event(
                                    hipEventSynchronize((hipEvent_t)event));
 }
 static iree_status_t
-iree_hal_hip_deferred_work_queue_device_interface_destroy_native_event(
+iree_hal_hip_deferred_work_queue_multidevice_interface_destroy_native_event(
     iree_hal_deferred_work_queue_device_interface_t* base_device_interface,
     iree_hal_deferred_work_queue_native_event_t event) {
   iree_hal_hip_deferred_work_queue_multidevice_interface_t* device_interface =
@@ -205,7 +205,7 @@ iree_hal_hip_deferred_work_queue_device_interface_destroy_native_event(
 }
 
 static iree_status_t
-iree_hal_hip_deferred_work_queue_device_interface_semaphore_acquire_timepoint_device_signal_native_event(
+iree_hal_hip_deferred_work_queue_multidevice_interface_semaphore_acquire_timepoint_device_signal_native_event(
     iree_hal_deferred_work_queue_device_interface_t* base_device_interface,
     struct iree_hal_semaphore_t* semaphore, uint64_t value,
     iree_hal_deferred_work_queue_native_event_t* out_event) {
@@ -216,7 +216,7 @@ iree_hal_hip_deferred_work_queue_device_interface_semaphore_acquire_timepoint_de
 }
 
 static bool
-iree_hal_hip_deferred_work_queue_device_interface_acquire_host_wait_event(
+iree_hal_hip_deferred_work_queue_multidevice_interface_acquire_host_wait_event(
     iree_hal_deferred_work_queue_device_interface_t* device_interface,
     struct iree_hal_semaphore_t* semaphore, uint64_t value,
     iree_hal_deferred_work_queue_host_device_event_t* out_event) {
@@ -225,7 +225,7 @@ iree_hal_hip_deferred_work_queue_device_interface_acquire_host_wait_event(
 }
 
 static iree_status_t
-iree_hal_hip_deferred_work_queue_device_interface_device_wait_on_host_event(
+iree_hal_hip_deferred_work_queue_multidevice_interface_device_wait_on_host_event(
     iree_hal_deferred_work_queue_device_interface_t* base_device_interface,
     iree_hal_deferred_work_queue_host_device_event_t wait_event) {
   iree_hal_hip_deferred_work_queue_multidevice_interface_t* device_interface =
@@ -239,14 +239,14 @@ iree_hal_hip_deferred_work_queue_device_interface_device_wait_on_host_event(
 }
 
 static void
-iree_hal_hip_deferred_work_queue_device_interface_release_wait_event(
+iree_hal_hip_deferred_work_queue_multidevice_interface_release_wait_event(
     iree_hal_deferred_work_queue_device_interface_t* device_interface,
     iree_hal_deferred_work_queue_host_device_event_t wait_event) {
   iree_hal_hip_event_release(wait_event);
 }
 
 static iree_hal_deferred_work_queue_native_event_t
-iree_hal_hip_deferred_work_queue_device_interface_native_event_from_wait_event(
+iree_hal_hip_deferred_work_queue_multidevice_interface_native_event_from_wait_event(
     iree_hal_deferred_work_queue_device_interface_t* device_interface,
     iree_hal_deferred_work_queue_host_device_event_t event) {
   iree_hal_hip_event_t* wait_event = (iree_hal_hip_event_t*)event;
@@ -261,19 +261,24 @@ static iree_status_t iree_hal_hip_multidevice_create_command_buffer_internal(
     iree_hal_command_buffer_t** out_command_buffer);
 
 static iree_status_t
-iree_hal_hip_deferred_work_queue_device_interface_create_stream_command_buffer(
+iree_hal_hip_deferred_work_queue_multidevice_interface_create_stream_command_buffer(
     iree_hal_deferred_work_queue_device_interface_t* base_device_interface,
     iree_hal_command_buffer_mode_t mode, iree_hal_command_category_t categories,
     iree_hal_queue_affinity_t queue_affinity, iree_hal_command_buffer_t** out) {
   iree_hal_hip_deferred_work_queue_multidevice_interface_t* device_interface =
       (iree_hal_hip_deferred_work_queue_multidevice_interface_t*)(base_device_interface);
-  return iree_hal_hip_multidevice_create_command_buffer_internal(
-      device_interface->device, mode, categories, queue_affinity, 0,
-      IREE_HAL_HIP_MULTIDEVICE_COMMAND_BUFFER_TYPE_STREAM, out);
+  return iree_hal_hip_stream_command_buffer_create(
+      iree_hal_device_allocator((iree_hal_device_t*)device_interface->device),
+      device_interface->hip_symbols, device_interface->device->nccl_symbols,
+      device_interface->device->device_contexts[device_interface->device_index]
+          .tracing_context,
+      mode, categories, 0, device_interface->dispatch_hip_stream,
+      &device_interface->device->block_pool,
+      device_interface->device->host_allocator, 0, out);
 }
 
 static iree_status_t
-iree_hal_hip_deferred_work_queue_device_interface_submit_command_buffer(
+iree_hal_hip_deferred_work_queue_multidevice_interface_submit_command_buffer(
     iree_hal_deferred_work_queue_device_interface_t* device_interface,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_queue_affinity_t queue_affinity) {
@@ -483,10 +488,10 @@ static iree_status_t iree_hal_hip_multidevice_create_internal(
       return status;
     }
     device_interfaces[i]->base.vtable =
-        &iree_hal_hip_deferred_work_queue_device_interface_vtable;
+        &iree_hal_hip_deferred_work_queue_multidevice_interface_vtable;
     device_interfaces[i]->hip_context = contexts[i];
     device_interfaces[i]->hip_symbols = symbols;
-    device_interfaces[i]->device = (iree_hal_device_t*)device;
+    device_interfaces[i]->device = device;
     device_interfaces[i]->hip_device = hip_devices[i];
     device_interfaces[i]->dispatch_hip_stream = dispatch_streams[i];
     device_interfaces[i]->host_allocator = host_allocator;
@@ -940,8 +945,9 @@ static iree_status_t iree_hal_hip_multidevice_create_command_buffer_internal(
       iree_hal_hip_multidevice_cast(base_device);
 
   iree_hal_command_buffer_t* buffers[IREE_HAL_HIP_MAX_MULTIDEVICE_COUNT];
-  memset(buffers, IREE_HAL_HIP_MAX_MULTIDEVICE_COUNT,
-         sizeof(iree_hal_command_buffer_t*));
+  memset(
+      buffers, 0x00,
+      sizeof(iree_hal_command_buffer_t*) * IREE_HAL_HIP_MAX_MULTIDEVICE_COUNT);
   if (queue_affinity == 0) {
     queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   }
@@ -950,10 +956,11 @@ static iree_status_t iree_hal_hip_multidevice_create_command_buffer_internal(
 
   iree_status_t status = iree_ok_status();
   uint32_t idx = 0;
-  while (iree_status_is_ok(status) && queue_affinity) {
-    uint32_t nidx = iree_math_count_trailing_zeros_u64(queue_affinity);
+  iree_hal_queue_affinity_t affinity = queue_affinity;
+  while (iree_status_is_ok(status) && affinity) {
+    uint32_t nidx = iree_math_count_trailing_zeros_u64(affinity);
     idx += nidx;
-    queue_affinity >>= nidx + 1;
+    affinity >>= nidx + 1;
     switch (type) {
       case IREE_HAL_HIP_MULTIDEVICE_COMMAND_BUFFER_TYPE_STREAM:
         status = iree_status_join(
@@ -963,8 +970,8 @@ static iree_status_t iree_hal_hip_multidevice_create_command_buffer_internal(
                         device->device_contexts[idx].tracing_context, mode,
                         command_categories, binding_capacity,
                         device->device_contexts[idx].hip_dispatch_stream,
-                        &device->block_pool, device->host_allocator, 1 << nidx,
-                        &buffers[idx]));
+                        &device->block_pool, device->host_allocator,
+                        (iree_hal_queue_affinity_t)1 << nidx, &buffers[idx]));
         break;
       case IREE_HAL_HIP_MULTIDEVICE_COMMAND_BUFFER_TYPE_GRAPH:
         status = iree_status_join(
@@ -973,8 +980,9 @@ static iree_status_t iree_hal_hip_multidevice_create_command_buffer_internal(
                 iree_hal_device_allocator(base_device), device->hip_symbols,
                 device->device_contexts[idx].tracing_context,
                 device->device_contexts[idx].hip_context, mode,
-                command_categories, 1 << nidx, binding_capacity,
-                &device->block_pool, device->host_allocator, &buffers[idx]));
+                command_categories, (iree_hal_queue_affinity_t)1 << nidx,
+                binding_capacity, &device->block_pool, device->host_allocator,
+                &buffers[idx]));
         break;
     }
     ++idx;
@@ -1297,9 +1305,14 @@ static iree_status_t iree_hal_hip_multidevice_queue_execute(
     queue_affinity = 0x1;
   }
 
-  uint64_t queue_affinity_mask = (1 << device->num_physical_devices);
+  uint64_t queue_affinity_mask =
+      ((iree_hal_queue_affinity_t)1 << device->num_physical_devices);
   queue_affinity_mask = queue_affinity_mask | (queue_affinity_mask - 1);
   queue_affinity &= queue_affinity_mask;
+  iree_hal_command_buffer_t** cbs;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      device->host_allocator,
+      sizeof(iree_hal_command_buffer_t*) * command_buffer_count, (void**)&cbs));
 
   iree_status_t status = iree_ok_status();
   uint32_t idx = 0;
@@ -1307,12 +1320,29 @@ static iree_status_t iree_hal_hip_multidevice_queue_execute(
     uint32_t nidx = iree_math_count_trailing_zeros_u64(queue_affinity);
     idx += nidx;
     queue_affinity >>= nidx + 1;
-    status = iree_hal_deferred_work_queue_enqueue(
-        device->device_contexts[idx].work_queue,
-        iree_hal_hip_multidevice_collect_tracing_context,
-        device->device_contexts[idx].tracing_context, wait_semaphore_list,
-        signal_semaphore_list, command_buffer_count, command_buffers,
-        binding_tables, queue_affinity);
+    for (size_t j = 0; j < command_buffer_count && iree_status_is_ok(status);
+         ++j) {
+      if (!(command_buffers[j]->queue_affinity &
+            ((iree_hal_queue_affinity_t)1 << idx))) {
+        status =
+            iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "Submitting a command buffer to an invalid queue");
+      }
+      if (iree_hal_deferred_command_buffer_isa(command_buffers[j])) {
+        cbs[j] = command_buffers[j];
+      } else {
+        status =
+            iree_hal_multi_command_buffer_get(command_buffers[j], idx, &cbs[j]);
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_deferred_work_queue_enqueue(
+          device->device_contexts[idx].work_queue,
+          iree_hal_hip_multidevice_collect_tracing_context,
+          device->device_contexts[idx].tracing_context, wait_semaphore_list,
+          signal_semaphore_list, command_buffer_count, cbs, binding_tables,
+          queue_affinity);
+    }
     if (iree_status_is_ok(status)) {
       // Try to advance the deferred work queue.
       status = iree_hal_deferred_work_queue_issue(
@@ -1320,7 +1350,7 @@ static iree_status_t iree_hal_hip_multidevice_queue_execute(
     }
     ++idx;
   }
-
+  iree_allocator_free(device->host_allocator, cbs);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -1331,7 +1361,8 @@ static iree_status_t iree_hal_hip_multidevice_queue_flush(
       iree_hal_hip_multidevice_cast(base_device);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  uint64_t queue_affinity_mask = (1 << device->num_physical_devices);
+  uint64_t queue_affinity_mask =
+      ((iree_hal_queue_affinity_t)1 << device->num_physical_devices);
   queue_affinity_mask = queue_affinity_mask | (queue_affinity_mask - 1);
   queue_affinity &= queue_affinity_mask;
 
@@ -1407,34 +1438,35 @@ static const iree_hal_device_vtable_t iree_hal_hip_multidevice_vtable = {
 };
 
 static const iree_hal_deferred_work_queue_device_interface_vtable_t
-    iree_hal_hip_deferred_work_queue_device_interface_vtable = {
-        .destroy = iree_hal_hip_deferred_work_queue_device_interface_destroy,
+    iree_hal_hip_deferred_work_queue_multidevice_interface_vtable = {
+        .destroy =
+            iree_hal_hip_deferred_work_queue_multidevice_interface_destroy,
         .bind_to_thread =
-            iree_hal_hip_deferred_work_queue_device_interface_bind_to_thread,
+            iree_hal_hip_deferred_work_queue_multidevice_interface_bind_to_thread,
         .wait_native_event =
-            iree_hal_hip_deferred_work_queue_device_interface_wait_native_event,
+            iree_hal_hip_deferred_work_queue_multidevice_interface_wait_native_event,
         .create_native_event =
-            iree_hal_hip_deferred_work_queue_device_interface_create_native_event,
+            iree_hal_hip_deferred_work_queue_multidevice_interface_create_native_event,
         .record_native_event =
-            iree_hal_hip_deferred_work_queue_device_interface_record_native_event,
+            iree_hal_hip_deferred_work_queue_multidevice_interface_record_native_event,
         .synchronize_native_event =
-            iree_hal_hip_deferred_work_queue_device_interface_synchronize_native_event,
+            iree_hal_hip_deferred_work_queue_multidevice_interface_synchronize_native_event,
         .destroy_native_event =
-            iree_hal_hip_deferred_work_queue_device_interface_destroy_native_event,
+            iree_hal_hip_deferred_work_queue_multidevice_interface_destroy_native_event,
         .semaphore_acquire_timepoint_device_signal_native_event =
-            iree_hal_hip_deferred_work_queue_device_interface_semaphore_acquire_timepoint_device_signal_native_event,
+            iree_hal_hip_deferred_work_queue_multidevice_interface_semaphore_acquire_timepoint_device_signal_native_event,
         .acquire_host_wait_event =
-            iree_hal_hip_deferred_work_queue_device_interface_acquire_host_wait_event,
+            iree_hal_hip_deferred_work_queue_multidevice_interface_acquire_host_wait_event,
         .device_wait_on_host_event =
-            iree_hal_hip_deferred_work_queue_device_interface_device_wait_on_host_event,
+            iree_hal_hip_deferred_work_queue_multidevice_interface_device_wait_on_host_event,
         .release_wait_event =
-            iree_hal_hip_deferred_work_queue_device_interface_release_wait_event,
+            iree_hal_hip_deferred_work_queue_multidevice_interface_release_wait_event,
         .native_event_from_wait_event =
-            iree_hal_hip_deferred_work_queue_device_interface_native_event_from_wait_event,
+            iree_hal_hip_deferred_work_queue_multidevice_interface_native_event_from_wait_event,
         .create_stream_command_buffer =
-            iree_hal_hip_deferred_work_queue_device_interface_create_stream_command_buffer,
+            iree_hal_hip_deferred_work_queue_multidevice_interface_create_stream_command_buffer,
         .submit_command_buffer =
-            iree_hal_hip_deferred_work_queue_device_interface_submit_command_buffer,
+            iree_hal_hip_deferred_work_queue_multidevice_interface_submit_command_buffer,
 };
 
 static const iree_hal_stream_tracing_device_interface_vtable_t
