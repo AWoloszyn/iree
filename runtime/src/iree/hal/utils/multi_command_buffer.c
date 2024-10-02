@@ -141,7 +141,7 @@ static iree_status_t iree_hal_multi_command_buffer_execution_barrier(
       iree_hal_multi_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status,
-               iree_hal_multi_command_buffer_execution_barrier(
+               iree_hal_command_buffer_execution_barrier(
                    command_buffer->child_buffers[num], source_stage_mask,
                    target_stage_mask, flags, memory_barrier_count,
                    memory_barriers, buffer_barrier_count, buffer_barriers));
