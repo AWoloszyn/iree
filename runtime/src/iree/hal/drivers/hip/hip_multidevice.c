@@ -1309,10 +1309,13 @@ static iree_status_t iree_hal_hip_multidevice_queue_execute(
       ((iree_hal_queue_affinity_t)1 << device->num_physical_devices);
   queue_affinity_mask = queue_affinity_mask | (queue_affinity_mask - 1);
   queue_affinity &= queue_affinity_mask;
-  iree_hal_command_buffer_t** cbs;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      device->host_allocator,
-      sizeof(iree_hal_command_buffer_t*) * command_buffer_count, (void**)&cbs));
+  iree_hal_command_buffer_t** cbs = NULL;
+  if (command_buffer_count) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+        device->host_allocator,
+        sizeof(iree_hal_command_buffer_t*) * command_buffer_count,
+        (void**)&cbs));
+  }
 
   iree_status_t status = iree_ok_status();
   uint32_t idx = 0;

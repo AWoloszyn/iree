@@ -31,10 +31,10 @@ TEST_F(SemaphoreSubmissionTest, SubmitWithNoCommandBuffers) {
       signal_payload_values,
   };
 
-  IREE_ASSERT_OK(iree_hal_device_queue_barrier(device_,
-                                               /*queue_affinity=*/0,
-                                               iree_hal_semaphore_list_empty(),
-                                               signal_semaphores));
+  IREE_ASSERT_OK(iree_hal_device_queue_barrier(
+      device_,
+      /*queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), signal_semaphores));
   IREE_ASSERT_OK(
       iree_hal_semaphore_wait(signal_semaphore, 1, iree_infinite_timeout()));
 
@@ -55,8 +55,9 @@ TEST_F(SemaphoreSubmissionTest, SubmitAndSignal) {
 
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
       device_,
-      /*queue_affinity=*/0, iree_hal_semaphore_list_empty(), signal_semaphores,
-      1, &command_buffer, /*binding_tables=*/NULL));
+      /*queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), signal_semaphores, 1, &command_buffer,
+      /*binding_tables=*/NULL));
   IREE_ASSERT_OK(
       iree_hal_semaphore_wait(signal_semaphore, 1, iree_infinite_timeout()));
 
@@ -88,8 +89,8 @@ TEST_F(SemaphoreSubmissionTest, SubmitWithWait) {
 
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
       device_,
-      /*queue_affinity=*/0, wait_semaphores, signal_semaphores, 1,
-      &command_buffer, /*binding_tables=*/NULL));
+      /*queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
+      signal_semaphores, 1, &command_buffer, /*binding_tables=*/NULL));
 
   // Work shouldn't start until the wait semaphore reaches its payload value.
   CheckSemaphoreValue(signal_semaphore, 100);
@@ -131,8 +132,8 @@ TEST_F(SemaphoreSubmissionTest, SubmitWithMultipleSemaphores) {
 
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
       device_,
-      /*queue_affinity=*/0, wait_semaphores, signal_semaphores, 1,
-      &command_buffer, /*binding_tables=*/NULL));
+      /*queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
+      signal_semaphores, 1, &command_buffer, /*binding_tables=*/NULL));
 
   // Work shouldn't start until all wait semaphores reach their payload values.
   CheckSemaphoreValue(signal_semaphore_1, 0);
