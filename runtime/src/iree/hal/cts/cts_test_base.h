@@ -44,6 +44,10 @@ iree_status_t create_default_test_device(iree_hal_driver_t* driver,
                                          iree_allocator_t host_allocator,
                                          iree_hal_device_t** out_device);
 
+// Returns the default queue afinity that should be used
+// for tests.
+iree_hal_queue_affinity_t get_default_submit_queue_affinity();
+
 enum class RecordingType {
   kDirect = 0,
   kIndirect,
@@ -98,10 +102,13 @@ class CTSTestResources {
   static iree_hal_driver_t* driver_;
   static iree_hal_device_t* device_;
   static iree_hal_allocator_t* device_allocator_;
+  static iree_hal_queue_affinity_t default_submit_affinity_;
 };
 /*static*/ iree_hal_driver_t* CTSTestResources::driver_ = NULL;
 /*static*/ iree_hal_device_t* CTSTestResources::device_ = NULL;
 /*static*/ iree_hal_allocator_t* CTSTestResources::device_allocator_ = NULL;
+/*static*/ iree_hal_queue_affinity_t
+    CTSTestResources::default_submit_affinity_ = 0;
 
 // Common setup for tests parameterized on driver names.
 template <typename BaseType = ::testing::Test>
@@ -135,6 +142,8 @@ class CTSTestBase : public BaseType, public CTSTestResources {
     }
     IREE_CHECK_OK(status);
     device_ = device;
+
+    default_submit_affinity_ = get_default_submit_queue_affinity();
 
     device_allocator_ = iree_hal_device_allocator(device_);
     iree_hal_allocator_retain(device_allocator_);
@@ -248,9 +257,8 @@ class CTSTestBase : public BaseType, public CTSTestResources {
     };
 
     iree_status_t status = iree_hal_device_queue_execute(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-        signal_semaphores, command_buffer_count, command_buffers,
-        binding_tables);
+        device_, default_submit_affinity_, wait_semaphores, signal_semaphores,
+        command_buffer_count, command_buffers, binding_tables);
     if (iree_status_is_ok(status)) {
       status = iree_hal_semaphore_wait(signal_semaphore, target_payload_value,
                                        iree_infinite_timeout());

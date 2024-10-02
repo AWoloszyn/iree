@@ -55,7 +55,7 @@ TEST_F(SemaphoreSubmissionTest, SubmitAndSignal) {
 
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
       device_,
-      /*queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*queue_affinity=*/default_submit_affinity_,
       iree_hal_semaphore_list_empty(), signal_semaphores, 1, &command_buffer,
       /*binding_tables=*/NULL));
   IREE_ASSERT_OK(
@@ -89,7 +89,7 @@ TEST_F(SemaphoreSubmissionTest, SubmitWithWait) {
 
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
       device_,
-      /*queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
+      /*queue_affinity=*/default_submit_affinity_, wait_semaphores,
       signal_semaphores, 1, &command_buffer, /*binding_tables=*/NULL));
 
   // Work shouldn't start until the wait semaphore reaches its payload value.
@@ -132,7 +132,7 @@ TEST_F(SemaphoreSubmissionTest, SubmitWithMultipleSemaphores) {
 
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
       device_,
-      /*queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
+      /*queue_affinity=*/default_submit_affinity_, wait_semaphores,
       signal_semaphores, 1, &command_buffer, /*binding_tables=*/NULL));
 
   // Work shouldn't start until all wait semaphores reach their payload values.
@@ -177,7 +177,7 @@ TEST_F(SemaphoreSubmissionTest, WaitAllHostAndDeviceSemaphores) {
 
   // Dispatch the device command buffer to have it wait.
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, device_wait_semaphores,
+      device_, default_submit_affinity_, device_wait_semaphores,
       device_signal_semaphores, 1, &command_buffer, /*binding_tables=*/NULL));
 
   // Start another thread and have it wait.
@@ -241,7 +241,7 @@ TEST_F(SemaphoreSubmissionTest,
 
   // Dispatch the device command buffer to have it wait.
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, device_wait_semaphores,
+      device_, default_submit_affinity_, device_wait_semaphores,
       device_signal_semaphores, 1, &command_buffer, /*binding_tables=*/NULL));
 
   // Start another thread and have it wait.
@@ -309,7 +309,7 @@ TEST_F(SemaphoreSubmissionTest, WaitAnyHostAndDeviceSemaphoresAndHostSignals) {
 
   // Dispatch the device command buffer to have it wait.
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, device_wait_semaphores,
+      device_, default_submit_affinity_, device_wait_semaphores,
       device_signal_semaphores, 1, &command_buffer, /*binding_tables=*/NULL));
 
   // Start another thread and have it wait.
@@ -379,7 +379,7 @@ TEST_F(SemaphoreSubmissionTest, IntermediateSemaphoreBetweenDeviceBatches) {
 
   // Dispatch the second command buffer.
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/semaphore1_list,
       /*signal_semaphore_list=*/semaphore2_list, 1, &command_buffer2,
       /*binding_tables=*/NULL));
@@ -393,7 +393,7 @@ TEST_F(SemaphoreSubmissionTest, IntermediateSemaphoreBetweenDeviceBatches) {
   iree_hal_semaphore_list_t command_buffer1_wait_semaphore_list = {
       /*count=*/0, nullptr, nullptr};
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/command_buffer1_wait_semaphore_list,
       /*signal_semaphore_list=*/semaphore1_list, 1, &command_buffer1,
       /*binding_tables=*/NULL));
@@ -448,17 +448,17 @@ TEST_F(SemaphoreSubmissionTest, TwoBatchesWaitingOn1FormerBatchAmongst2) {
 
   // We submit the command buffers in reverse order.
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/semaphore11_list,
       /*signal_semaphore_list=*/semaphore22_list, 1, &command_buffer22,
       /*binding_tables=*/NULL));
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/semaphore11_list,
       /*signal_semaphore_list=*/semaphore21_list, 1, &command_buffer21,
       /*binding_tables=*/NULL));
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/empty_semaphore_list,
       /*signal_semaphore_list=*/empty_semaphore_list, 1, &command_buffer12,
       /*binding_tables=*/NULL));
@@ -471,7 +471,7 @@ TEST_F(SemaphoreSubmissionTest, TwoBatchesWaitingOn1FormerBatchAmongst2) {
 
   // Submit command_buffer11.
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/empty_semaphore_list,
       /*signal_semaphore_list=*/semaphore11_list, 1, &command_buffer11,
       /*binding_tables=*/NULL));
@@ -543,13 +543,13 @@ TEST_F(SemaphoreSubmissionTest, TwoBatchesWaitingOnDifferentSemaphoreValues) {
 
   // We submit the command buffers in reverse order.
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/command_buffer22_semaphore_wait_list,
       /*signal_semaphore_list=*/command_buffer22_signal_list, 1,
       &command_buffer22, /*binding_tables=*/NULL));
   // We submit the command buffers in reverse order.
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/command_buffer21_semaphore_wait_list,
       /*signal_semaphore_list=*/command_buffer21_signal_list, 1,
       &command_buffer21, /*binding_tables=*/NULL));
@@ -561,7 +561,7 @@ TEST_F(SemaphoreSubmissionTest, TwoBatchesWaitingOnDifferentSemaphoreValues) {
   CheckSemaphoreValue(semaphore22, 0);
 
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/command_buffer11_semaphore_wait_list,
       /*signal_semaphore_list=*/command_buffer11_semaphore_signal_list, 1,
       &command_buffer11, /*binding_tables=*/NULL));
@@ -619,7 +619,7 @@ TEST_F(SemaphoreSubmissionTest, BatchWaitingOnAnotherAndHostSignal) {
   iree_hal_semaphore_list_t command_buffer2_signal_list = {
       /*count=*/1, &semaphore3, &semaphore_signal_value};
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/command_buffer2_wait_list,
       /*signal_semaphore_list=*/command_buffer2_signal_list, 1,
       &command_buffer2, /*binding_tables=*/NULL));
@@ -634,7 +634,7 @@ TEST_F(SemaphoreSubmissionTest, BatchWaitingOnAnotherAndHostSignal) {
   iree_hal_semaphore_list_t command_buffer1_signal_list = {
       /*count=*/1, &semaphore1, &semaphore_signal_value};
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/command_buffer1_wait_list,
       /*signal_semaphore_list=*/command_buffer1_signal_list, 1,
       &command_buffer1, /*binding_tables=*/NULL));
@@ -691,7 +691,7 @@ TEST_F(SemaphoreSubmissionTest, DeviceBatchSignalAnotherAndHost) {
   iree_hal_semaphore_list_t command_buffer2_signal_list = {
       /*count=*/1, &semaphore2, &signal_value};
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/command_buffer2_wait_list,
       /*signal_semaphore_list=*/command_buffer2_signal_list, 1,
       &command_buffer2, /*binding_tables=*/NULL));
@@ -729,7 +729,7 @@ TEST_F(SemaphoreSubmissionTest, DeviceBatchSignalAnotherAndHost) {
       /*count=*/2, command_buffer1_signal_semaphore_array,
       command_buffer1_signal_value_array};
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/command_buffer1_wait_list,
       /*signal_semaphore_list=*/command_buffer1_signal_list, 1,
       &command_buffer1, /*binding_tables=*/NULL));
@@ -779,7 +779,7 @@ TEST_F(SemaphoreSubmissionTest, BatchWaitingOnSmallerValueAfterSignaled) {
   iree_hal_semaphore_list_t command_buffer_signal_list = {
       /*count=*/1, &semaphore2, &semaphore2_signal_value};
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/command_buffer_wait_list,
       /*signal_semaphore_list=*/command_buffer_signal_list, 1, &command_buffer,
       /*binding_tables=*/NULL));
@@ -821,7 +821,7 @@ TEST_F(SemaphoreSubmissionTest, BatchWaitingOnSmallerValueBeforeSignaled) {
   iree_hal_semaphore_list_t command_buffer_signal_list = {
       /*count=*/1, &semaphore2, &semaphore2_signal_value};
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/command_buffer_wait_list,
       /*signal_semaphore_list=*/command_buffer_signal_list, 1, &command_buffer,
       /*binding_tables=*/NULL));
@@ -866,7 +866,7 @@ TEST_F(SemaphoreSubmissionTest, PropagateFailSignal) {
   iree_hal_semaphore_list_t command_buffer_signal_list = {
       /*count=*/1, &semaphore2, &semaphore2_signal_value};
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, default_submit_affinity_,
       /*wait_semaphore_list=*/command_buffer_wait_list,
       /*signal_semaphore_list=*/command_buffer_signal_list, 1, &command_buffer,
       /*binding_tables=*/NULL));

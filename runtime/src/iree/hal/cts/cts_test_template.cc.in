@@ -14,6 +14,7 @@
 #cmakedefine IREE_CTS_TARGET_BACKEND "@IREE_CTS_TARGET_BACKEND@"
 #cmakedefine IREE_CTS_DEVICE_CREATION_HDR "@IREE_CTS_DEVICE_CREATION_HDR@"
 #cmakedefine IREE_CTS_DEFAULT_DEVICE_CREATION_FN @IREE_CTS_DEFAULT_DEVICE_CREATION_FN@
+#cmakedefine IREE_CTS_DEFAULT_SUBMIT_QUEUE_AFFINITY @IREE_CTS_DEFAULT_SUBMIT_QUEUE_AFFINITY@
 
 // clang-format on
 
@@ -21,6 +22,10 @@
 
 #ifndef IREE_CTS_DEFAULT_DEVICE_CREATION_FN
 #define IREE_CTS_DEFAULT_DEVICE_CREATION_FN iree_hal_driver_create_default_device
+#endif
+
+#ifndef IREE_CTS_DEFAULT_SUBMIT_QUEUE_AFFINITY
+#define IREE_CTS_DEFAULT_SUBMIT_QUEUE_AFFINITY IREE_HAL_QUEUE_AFFINITY_ANY
 #endif
 
 #include IREE_CTS_DRIVER_REGISTRATION_HDR
@@ -59,6 +64,10 @@ const char* get_test_executable_format() {
 #else
   return "UNDEFINED";
 #endif
+}
+
+iree_hal_queue_affinity_t get_default_submit_queue_affinity() {
+  return IREE_CTS_DEFAULT_SUBMIT_QUEUE_AFFINITY;
 }
 
 iree_const_byte_span_t get_test_executable_data(iree_string_view_t file_name) {
