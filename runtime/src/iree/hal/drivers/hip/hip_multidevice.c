@@ -274,7 +274,8 @@ iree_hal_hip_deferred_work_queue_multidevice_interface_create_stream_command_buf
           .tracing_context,
       mode, categories, 0, device_interface->dispatch_hip_stream,
       &device_interface->device->block_pool,
-      device_interface->device->host_allocator, 0, out);
+      device_interface->device->host_allocator,
+      (iree_hal_queue_affinity_t)1 << device_interface->device_index, out);
 }
 
 static iree_status_t
