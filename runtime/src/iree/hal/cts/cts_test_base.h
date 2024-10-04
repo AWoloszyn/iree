@@ -13,6 +13,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/string_view.h"
+#include "iree/base/tracing.h"
 #include "iree/hal/api.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -165,6 +166,7 @@ class CTSTestBase : public BaseType, public CTSTestResources {
   }
 
   virtual void SetUp() {
+    IREE_TRACE_FRAME_MARK();
     if (!driver_) {
       GTEST_SKIP() << "Skipping test as '" << get_test_driver_name()
                    << "' driver is unavailable";

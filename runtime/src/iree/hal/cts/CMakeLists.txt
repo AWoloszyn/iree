@@ -45,6 +45,7 @@ set(IREE_ALL_CTS_EXECUTABLE_SOURCES
 set (IREE_DEVICE_GROUP_CTS_TESTS
   "device_group_copy"
   "device_group_driver"
+  PARENT_SCOPE
 )
 
 iree_cc_library(
