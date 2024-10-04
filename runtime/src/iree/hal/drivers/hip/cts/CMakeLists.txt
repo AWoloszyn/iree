@@ -35,6 +35,7 @@ iree_hal_cts_test_suite(
   EXCLUDED_TESTS
     # HAL event is unimplemented for now.
     "event"
+    IREE_DEVICE_GROUP_CTS_TESTS
   LABELS
     driver=hip
     requires-gpu-amd
@@ -69,6 +70,7 @@ iree_hal_cts_test_suite(
     "file"
     # HAL event is unimplemented for now.
     "event"
+    IREE_DEVICE_GROUP_CTS_TESTS
   LABELS
     driver=hip
 )
@@ -135,6 +137,7 @@ iree_hal_cts_test_suite(
     "command_buffer_dispatch"
     "command_buffer_update_buffer"
     "file"
+    "device_group_copy"
     # HAL event is unimplemented for now.
     "event"
   LABELS
