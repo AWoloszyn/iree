@@ -100,7 +100,7 @@ TEST_F(DriverTest, QueryAndCreateAvailableDevicesByPath) {
        /*empty on purpose*/) {
     size_t device_count = grouped_devices.count(it->first);
     if (device_count == 1) {
-      // This group has only once device, therefore not a multidevice.
+      // This group has only once device, therefore not a device group.
       ++it;
       continue;
     }

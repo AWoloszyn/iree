@@ -38,7 +38,7 @@ if(IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF)
       iree::hal::drivers::local_sync::registration
     EXCLUDED_TESTS
       "semaphore_submission",  # SubmitWithWait hangs (requires async)
-      "multidevice_driver" # Multidevice not supported yet
+      IREE_DEVICE_GROUP_CTS_TESTS # Device groups not supported yet
     LABELS
       driver=local-sync
     )
@@ -64,7 +64,7 @@ if(IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE)
       iree::hal::drivers::local_sync::registration
     EXCLUDED_TESTS
       "semaphore_submission",  # SubmitWithWait hangs (requires async)
-      "multidevice_driver" # Multidevice not supported yet
+      IREE_DEVICE_GROUP_CTS_TESTS # Device groups not supported yet
     LABELS
       driver=local-sync
   )

@@ -14,7 +14,8 @@ set(IREE_ALL_CTS_TESTS
   "command_buffer_fill_buffer"
   "command_buffer_update_buffer"
   "driver"
-  "multidevice_driver"
+  "device_group_copy"
+  "device_group_driver"
   "event"
   "executable_cache"
   "file"
@@ -39,6 +40,11 @@ set(IREE_ALL_CTS_EXECUTABLE_SOURCES
   "command_buffer_dispatch_constants_test"
   "executable_cache_test"
   PARENT_SCOPE
+)
+
+set (IREE_DEVICE_GROUP_CTS_TESTS
+  "device_group_copy"
+  "device_group_driver"
 )
 
 iree_cc_library(
@@ -160,6 +166,32 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    device_group_copy_test_library
+  HDRS
+    "device_group_copy_test.h"
+  DEPS
+    ::cts_test_base
+    iree::base
+    iree::hal
+    iree::testing::gtest
+  TESTONLY
+)
+
+iree_cc_library(
+  NAME
+    device_group_driver_test_library
+  HDRS
+    "device_group_driver_test.h"
+  DEPS
+    ::cts_test_base
+    iree::base
+    iree::hal
+    iree::testing::gtest
+  TESTONLY
+)
+
+iree_cc_library(
+  NAME
     driver_test_library
   HDRS
     "driver_test.h"
@@ -202,19 +234,6 @@ iree_cc_library(
     file_test_library
   HDRS
     "file_test.h"
-  DEPS
-    ::cts_test_base
-    iree::base
-    iree::hal
-    iree::testing::gtest
-  TESTONLY
-)
-
-iree_cc_library(
-  NAME
-    multidevice_driver_test_library
-  HDRS
-    "multidevice_driver_test.h"
   DEPS
     ::cts_test_base
     iree::base

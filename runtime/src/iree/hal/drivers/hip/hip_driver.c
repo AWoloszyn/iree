@@ -14,7 +14,7 @@
 #include "iree/hal/drivers/hip/api.h"
 #include "iree/hal/drivers/hip/dynamic_symbols.h"
 #include "iree/hal/drivers/hip/hip_device.h"
-#include "iree/hal/drivers/hip/hip_multidevice.h"
+#include "iree/hal/drivers/hip/hip_device_group_device.h"
 #include "iree/hal/drivers/hip/rccl_dynamic_symbols.h"
 #include "iree/hal/drivers/hip/status_util.h"
 
@@ -505,7 +505,7 @@ static iree_status_t iree_hal_hip_driver_get_device_id_by_path(
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "unsupported device path");
 }
 
-static iree_status_t iree_hal_hip_driver_create_multidevice_by_ids(
+static iree_status_t iree_hal_hip_driver_create_device_group_device_by_ids(
     iree_hal_driver_t* base_driver, iree_hal_device_id_t* device_ids,
     iree_host_size_t device_count, iree_host_size_t param_count,
     const iree_string_pair_t* params, iree_allocator_t host_allocator,
@@ -519,13 +519,13 @@ static iree_status_t iree_hal_hip_driver_create_multidevice_by_ids(
   // Ensure HIP is initialized before querying it.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_hip_init(driver));
 
-  hipDevice_t devices[IREE_HAL_HIP_MAX_MULTIDEVICE_COUNT];
+  hipDevice_t devices[IREE_HAL_HIP_MAX_DEVICE_GROUP_DEVICE_COUNT];
 
   for (iree_host_size_t i = 0; i < device_count; ++i) {
     if (device_ids[i] == IREE_HAL_DEVICE_ID_DEFAULT) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "Invalid to create a multidevice with the default device id");
+          "Invalid to create a device group with the default device id");
     } else {
       devices[i] = IREE_DEVICE_ID_TO_HIPDEVICE(device_ids[i]);
     }
@@ -534,7 +534,7 @@ static iree_status_t iree_hal_hip_driver_create_multidevice_by_ids(
   iree_string_view_t device_name = iree_make_cstring_view("hip");
 
   // Attempt to create the device now.
-  iree_status_t status = iree_hal_hip_multidevice_create(
+  iree_status_t status = iree_hal_hip_device_group_device_create(
       base_driver, device_name, &driver->device_params, &driver->hip_symbols,
       &driver->nccl_symbols, device_count, devices, host_allocator, out_device);
 
@@ -542,7 +542,7 @@ static iree_status_t iree_hal_hip_driver_create_multidevice_by_ids(
   return status;
 }
 
-static iree_status_t iree_hal_hip_driver_create_multidevice_by_path(
+static iree_status_t iree_hal_hip_driver_create_device_group_device_by_path(
     iree_hal_driver_t* base_driver, iree_string_view_t driver_name,
     iree_string_view_t device_path, iree_host_size_t param_count,
     const iree_string_pair_t* params, iree_allocator_t host_allocator,
@@ -550,7 +550,7 @@ static iree_status_t iree_hal_hip_driver_create_multidevice_by_path(
   IREE_ASSERT_ARGUMENT(base_driver);
   IREE_ASSERT_ARGUMENT(out_device);
 
-  iree_hal_device_id_t device_ids[IREE_HAL_HIP_MAX_MULTIDEVICE_COUNT];
+  iree_hal_device_id_t device_ids[IREE_HAL_HIP_MAX_DEVICE_GROUP_DEVICE_COUNT];
   iree_host_size_t idx = 0;
   for (iree_host_size_t offs = 0; offs < device_path.size;) {
     iree_host_size_t comma_pos =
@@ -568,10 +568,10 @@ static iree_status_t iree_hal_hip_driver_create_multidevice_by_path(
   if (idx < 2) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "Could not create a multidevice with fewer than 2 devices");
+        "Could not create a device group with fewer than 2 devices");
   }
 
-  return iree_hal_hip_driver_create_multidevice_by_ids(
+  return iree_hal_hip_driver_create_device_group_device_by_ids(
       base_driver, device_ids, idx, param_count, params, host_allocator,
       out_device);
 }
@@ -592,7 +592,7 @@ static iree_status_t iree_hal_hip_driver_create_device_by_path(
 
   if (iree_string_view_find_char(device_path, ',', 0) !=
       IREE_STRING_VIEW_NPOS) {
-    return iree_hal_hip_driver_create_multidevice_by_path(
+    return iree_hal_hip_driver_create_device_group_device_by_path(
         base_driver, driver_name, device_path, param_count, params,
         host_allocator, out_device);
   }

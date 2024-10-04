@@ -4,15 +4,16 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_HAL_DRIVERS_HIP_REGISTRATION_MULTIDEVICE_H_
-#define IREE_HAL_DRIVERS_HIP_REGISTRATION_MULTIDEVICE_H_
+#ifndef IREE_HAL_DRIVERS_HIP_REGISTRATION_DEVICE_GROUP_H_
+#define IREE_HAL_DRIVERS_HIP_REGISTRATION_DEVICE_GROUP_H_
 
 #include <map>
 
 #include "iree/hal/driver.h"
 #include "iree/testing/status_matchers.h"
 
-inline iree_status_t iree_hal_drivers_hip_cts_default_multidevice_create(
+inline iree_status_t
+iree_hal_drivers_hip_cts_default_device_group_device_create(
     iree_hal_driver_t* driver, iree_allocator_t host_allocator,
     iree_hal_device_t** out_device) {
   std::multimap<std::string, iree_host_size_t> grouped_devices;
@@ -61,11 +62,11 @@ inline iree_status_t iree_hal_drivers_hip_cts_default_multidevice_create(
 
   if (!max_valid_devices) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "Not multidevice found on the system");
+                            "No device group found on the system");
   }
   return iree_hal_driver_create_device_by_path(
       driver, IREE_SV("hip"), IREE_SV(path.c_str()), /*param_count=*/0,
       /*params=*/NULL, iree_allocator_system(), out_device);
 }
 
-#endif  // IREE_HAL_DRIVERS_HIP_REGISTRATION_MULTIDEVICE_H_
+#endif  // IREE_HAL_DRIVERS_HIP_REGISTRATION_DEVICE_GROUP_H_
