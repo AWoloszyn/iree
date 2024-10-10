@@ -220,6 +220,7 @@ class CTSTestBase : public BaseType, public CTSTestResources {
     params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
                    IREE_HAL_BUFFER_USAGE_TRANSFER |
                    IREE_HAL_BUFFER_USAGE_MAPPING;
+    params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
     iree_hal_buffer_t* device_buffer = NULL;
     IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
         iree_hal_device_allocator(device_), params, buffer_size,
