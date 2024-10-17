@@ -42,7 +42,6 @@ typedef struct iree_hal_hip_native_executable_t {
   uint32_t num_devices;
   iree_host_size_t native_info_device_size;
   iree_hal_hip_native_executable_per_device_data_t per_device_data[];
-
 } iree_hal_hip_native_executable_t;
 
 static iree_hal_hip_native_executable_per_device_data_t*

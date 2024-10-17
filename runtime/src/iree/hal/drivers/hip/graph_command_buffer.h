@@ -11,6 +11,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/hip/dynamic_symbols.h"
 #include "iree/hal/drivers/hip/hip_headers.h"
+#include "iree/hal/utils/stream_tracing.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,6 +51,10 @@ hipGraphExec_t iree_hal_hip_graph_command_buffer_handle(
 // in order to notify the tracing system that there are events to collect.
 void iree_hal_hip_graph_tracing_notify_submitted_commands(
     iree_hal_command_buffer_t* command_buffer);
+
+iree_hal_stream_tracing_context_event_list_t
+iree_hal_hip_graph_command_buffer_tracing_events(
+    iree_hal_command_buffer_t* base_command_buffer);
 
 #ifdef __cplusplus
 }  // extern "C"

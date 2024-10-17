@@ -50,6 +50,10 @@ bool iree_hal_hip_stream_command_buffer_isa(
 // to collect.
 void iree_hal_hip_stream_notify_submitted_commands(
     iree_hal_command_buffer_t* base_command_buffer);
+
+iree_hal_stream_tracing_context_event_list_t
+iree_hal_hip_stream_command_buffer_tracing_events(
+    iree_hal_command_buffer_t* base_command_buffer);
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

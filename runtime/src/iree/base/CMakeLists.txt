@@ -21,6 +21,8 @@ iree_cc_library(
     "loop.h"
     "loop_inline.c"
     "loop_inline.h"
+    "rbt.h"
+    "rbt.c"
     "status.c"
     "status.h"
     "status_cc.h"
@@ -145,6 +147,44 @@ iree_cc_test(
     ::base
     ::loop_sync
     ::loop_test_hdrs
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+
+iree_cc_library(
+  NAME
+    queue
+  HDRS
+    "queue.h"
+  SRCS
+    "queue.c"
+  DEPS
+    ::base
+    iree::base::internal
+    iree::base::internal::wait_handle
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    queue_test
+  SRCS
+    "queue_test.cc"
+  DEPS
+    ::base
+    ::queue
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    rbt_test
+  SRCS
+    "rbt_test.cc"
+  DEPS
+    ::base
     iree::testing::gtest
     iree::testing::gtest_main
 )

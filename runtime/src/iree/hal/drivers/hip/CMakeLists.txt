@@ -21,6 +21,8 @@ iree_cc_library(
     "api.h"
   SRCS
     "api.h"
+    "cleanup_thread.c"
+    "cleanup_thread.h"
     "event_pool.c"
     "event_pool.h"
     "event_semaphore.c"
@@ -47,14 +49,13 @@ iree_cc_library(
     "rccl_channel.h"
     "stream_command_buffer.c"
     "stream_command_buffer.h"
-    "timepoint_pool.c"
-    "timepoint_pool.h"
   INCLUDES
     "${HIP_API_HEADERS_ROOT}"
   DEPS
     ::dynamic_symbols
     iree::base
     iree::base::core_headers
+    iree::base::queue
     iree::base::internal
     iree::base::internal::arena
     iree::base::internal::atomic_slist

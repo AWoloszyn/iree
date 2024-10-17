@@ -844,6 +844,14 @@ static iree_status_t iree_hal_hip_graph_command_buffer_dispatch_indirect(
                           "indirect dispatch not yet implemented");
 }
 
+iree_hal_stream_tracing_context_event_list_t
+iree_hal_hip_graph_command_buffer_tracing_events(
+    iree_hal_command_buffer_t* base_command_buffer) {
+  iree_hal_hip_graph_command_buffer_t* command_buffer =
+      iree_hal_hip_graph_command_buffer_cast(base_command_buffer);
+  return command_buffer->tracing_event_list;
+}
+
 static const iree_hal_command_buffer_vtable_t
     iree_hal_hip_graph_command_buffer_vtable = {
         .destroy = iree_hal_hip_graph_command_buffer_destroy,
