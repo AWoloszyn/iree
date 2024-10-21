@@ -11,8 +11,12 @@
 #include "iree/base/config.h"
 #include "stdint.h"
 
+void iree_tree_add_node_to_cache(iree_tree_t* tree, iree_tree_node_t* node);
+
 iree_status_t iree_tree_initialize(iree_allocator_t allocator,
                                    iree_host_size_t element_size,
+                                   void* initial_node_cache,
+                                   iree_host_size_t initial_node_cache_size,
                                    iree_tree_t* tree) {
   tree->element_size = element_size;
   tree->allocator = allocator;
@@ -21,6 +25,20 @@ iree_status_t iree_tree_initialize(iree_allocator_t allocator,
   tree->cache = NULL;  // Initialize cache
   memset(&tree->nil, 0x00, sizeof(iree_tree_node_t));
   tree->nil.is_sentinel = true;
+  tree->initial_node_cache = initial_node_cache;
+  tree->initial_node_cache_size = initial_node_cache_size;
+  if (initial_node_cache) {
+    memset(initial_node_cache, 0, initial_node_cache_size);
+    iree_host_size_t node_size =
+        iree_host_align(sizeof(iree_tree_node_t) + element_size, 16);
+
+    iree_tree_node_t* node = (iree_tree_node_t*)initial_node_cache;
+    for (iree_host_size_t i = 0; i < initial_node_cache_size / node_size; i++) {
+      node->data = (uint8_t*)node + sizeof(iree_tree_node_t);
+      iree_tree_add_node_to_cache(tree, node);
+      node = (iree_tree_node_t*)((uint8_t*)node + node_size);
+    }
+  }
   return iree_ok_status();
 }
 
@@ -66,6 +84,11 @@ iree_host_size_t iree_tree_size(iree_tree_t* tree) { return tree->size; }
 
 bool iree_tree_free_node(iree_tree_node_t* node, void* user_data) {
   iree_tree_t* tree = (iree_tree_t*)user_data;
+  if ((uint8_t*)node > tree->initial_node_cache &&
+      (uint8_t*)node <
+          tree->initial_node_cache + tree->initial_node_cache_size) {
+    return true;
+  }
   iree_allocator_free(tree->allocator, node);
   return true;
 }
@@ -77,7 +100,11 @@ void iree_tree_deinitialize(iree_tree_t* tree) {
   iree_tree_node_t* node = tree->cache;
   while (node) {
     iree_tree_node_t* next = node->right;
-    iree_allocator_free(tree->allocator, node);
+    if ((uint8_t*)node < tree->initial_node_cache ||
+        (uint8_t*)node >
+            tree->initial_node_cache + tree->initial_node_cache_size) {
+      iree_allocator_free(tree->allocator, node);
+    }
     node = next;
   }
 

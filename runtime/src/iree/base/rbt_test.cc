@@ -12,12 +12,14 @@ class RedBlackTreeTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_allocator_t allocator = iree_allocator_system();
-    IREE_CHECK_OK(iree_tree_initialize(allocator, sizeof(int), &tree_));
+    IREE_CHECK_OK(iree_tree_initialize(allocator, sizeof(int), initial_cache,
+                                       1024, &tree_));
   }
 
   void TearDown() override { iree_tree_deinitialize(&tree_); }
 
   iree_tree_t tree_;
+  uint8_t initial_cache[1024];
 };
 
 TEST_F(RedBlackTreeTest, initialize) { EXPECT_EQ(iree_tree_size(&tree_), 0); }

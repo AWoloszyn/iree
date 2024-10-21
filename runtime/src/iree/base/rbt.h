@@ -42,6 +42,8 @@ typedef struct iree_tree_t {
   iree_host_size_t size;
   iree_tree_node_t* cache;  // Cache for deleted nodes
   iree_tree_node_t nil;
+  uint8_t* initial_node_cache;
+  iree_host_size_t initial_node_cache_size;
 } iree_tree_t;
 
 void* iree_tree_node_get_data(iree_tree_node_t* node);
@@ -49,6 +51,8 @@ iree_host_size_t iree_tree_node_get_key(iree_tree_node_t* node);
 
 iree_status_t iree_tree_initialize(iree_allocator_t allocator,
                                    iree_host_size_t element_size,
+                                   void* initial_node_cache,
+                                   iree_host_size_t initial_node_cache_size,
                                    iree_tree_t* tree);
 uint32_t iree_tree_get_data_size(iree_tree_t* tree);
 void iree_tree_deinitialize(iree_tree_t* tree);
