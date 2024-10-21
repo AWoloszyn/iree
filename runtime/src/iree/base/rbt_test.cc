@@ -12,45 +12,45 @@ class RedBlackTreeTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_allocator_t allocator = iree_allocator_system();
-    IREE_CHECK_OK(iree_tree_create(allocator, sizeof(int), &tree_));
+    IREE_CHECK_OK(iree_tree_initialize(allocator, sizeof(int), &tree_));
   }
 
-  void TearDown() override { iree_tree_free(tree_); }
+  void TearDown() override { iree_tree_deinitialize(&tree_); }
 
-  iree_tree_t* tree_;
+  iree_tree_t tree_;
 };
 
-TEST_F(RedBlackTreeTest, initialize) { EXPECT_EQ(iree_tree_size(tree_), 0); }
+TEST_F(RedBlackTreeTest, initialize) { EXPECT_EQ(iree_tree_size(&tree_), 0); }
 
 TEST_F(RedBlackTreeTest, insert) {
   iree_tree_node_t* node;
-  EXPECT_EQ(iree_tree_insert(tree_, 10, &node), iree_ok_status());
-  EXPECT_EQ(iree_tree_size(tree_), 1);
+  EXPECT_EQ(iree_tree_insert(&tree_, 10, &node), iree_ok_status());
+  EXPECT_EQ(iree_tree_size(&tree_), 1);
   EXPECT_EQ(iree_tree_node_get_key(node), 10);
 }
 
 TEST_F(RedBlackTreeTest, get) {
   iree_tree_node_t* node;
-  iree_tree_insert(tree_, 10, &node);
-  EXPECT_NE(iree_tree_get(tree_, 10), nullptr);
-  EXPECT_EQ(iree_tree_get(tree_, 20), nullptr);
+  iree_tree_insert(&tree_, 10, &node);
+  EXPECT_NE(iree_tree_get(&tree_, 10), nullptr);
+  EXPECT_EQ(iree_tree_get(&tree_, 20), nullptr);
 }
 
 TEST_F(RedBlackTreeTest, delete) {
   iree_tree_node_t* node;
-  iree_tree_insert(tree_, 10, &node);
-  iree_tree_erase(tree_, node);
-  EXPECT_EQ(iree_tree_get(tree_, 10), nullptr);
-  EXPECT_EQ(iree_tree_size(tree_), 0);
+  iree_tree_insert(&tree_, 10, &node);
+  iree_tree_erase(&tree_, node);
+  EXPECT_EQ(iree_tree_get(&tree_, 10), nullptr);
+  EXPECT_EQ(iree_tree_size(&tree_), 0);
 }
 
 TEST_F(RedBlackTreeTest, walk) {
   iree_tree_node_t* node;
-  iree_tree_insert(tree_, 10, &node);
+  iree_tree_insert(&tree_, 10, &node);
   static_cast<int*>(iree_tree_node_get_data(node))[0] = 10;
-  iree_tree_insert(tree_, 20, &node);
+  iree_tree_insert(&tree_, 20, &node);
   static_cast<int*>(iree_tree_node_get_data(node))[0] = 20;
-  iree_tree_insert(tree_, 30, &node);
+  iree_tree_insert(&tree_, 30, &node);
   static_cast<int*>(iree_tree_node_get_data(node))[0] = 30;
 
   int sum = 0;
@@ -61,38 +61,38 @@ TEST_F(RedBlackTreeTest, walk) {
     *sum += *static_cast<int*>(iree_tree_node_get_data(node));
     return true;
   };
-  iree_tree_walk(tree_, IREE_TREE_WALK_PREORDER, callback, &sum);
+  iree_tree_walk(&tree_, IREE_TREE_WALK_PREORDER, callback, &sum);
   EXPECT_EQ(sum, 60);
 }
 
 TEST_F(RedBlackTreeTest, boundary_conditions) {
   iree_tree_node_t* node;
-  iree_tree_insert(tree_, 10, &node);
-  iree_tree_insert(tree_, 20, &node);
-  iree_tree_insert(tree_, 30, &node);
+  iree_tree_insert(&tree_, 10, &node);
+  iree_tree_insert(&tree_, 20, &node);
+  iree_tree_insert(&tree_, 30, &node);
 
-  EXPECT_EQ(iree_tree_node_get_key(iree_tree_first(tree_)), 10);
-  EXPECT_EQ(iree_tree_node_get_key(iree_tree_last(tree_)), 30);
-  EXPECT_EQ(iree_tree_node_get_key(iree_tree_lower_bound(tree_, 15)), 20);
-  EXPECT_EQ(iree_tree_node_get_key(iree_tree_upper_bound(tree_, 15)), 20);
+  EXPECT_EQ(iree_tree_node_get_key(iree_tree_first(&tree_)), 10);
+  EXPECT_EQ(iree_tree_node_get_key(iree_tree_last(&tree_)), 30);
+  EXPECT_EQ(iree_tree_node_get_key(iree_tree_lower_bound(&tree_, 15)), 20);
+  EXPECT_EQ(iree_tree_node_get_key(iree_tree_upper_bound(&tree_, 15)), 20);
 }
 
 TEST_F(RedBlackTreeTest, move_node) {
   iree_tree_node_t* node;
-  iree_tree_insert(tree_, 10, &node);
-  iree_tree_move_node(tree_, node, 20);
-  EXPECT_EQ(iree_tree_get(tree_, 10), nullptr);
-  EXPECT_NE(iree_tree_get(tree_, 20), nullptr);
+  iree_tree_insert(&tree_, 10, &node);
+  iree_tree_move_node(&tree_, node, 20);
+  EXPECT_EQ(iree_tree_get(&tree_, 10), nullptr);
+  EXPECT_NE(iree_tree_get(&tree_, 20), nullptr);
 }
 
 TEST_F(RedBlackTreeTest, in_order_iterators) {
   iree_tree_node_t* node;
-  iree_tree_insert(tree_, 10, &node);
-  iree_tree_insert(tree_, 20, &node);
-  iree_tree_insert(tree_, 30, &node);
+  iree_tree_insert(&tree_, 10, &node);
+  iree_tree_insert(&tree_, 20, &node);
+  iree_tree_insert(&tree_, 30, &node);
 
   std::vector<int> keys;
-  for (iree_tree_node_t* node = iree_tree_first(tree_); node != nullptr;
+  for (iree_tree_node_t* node = iree_tree_first(&tree_); node != nullptr;
        node = iree_tree_node_next(node)) {
     keys.push_back(iree_tree_node_get_key(node));
   }
@@ -105,12 +105,12 @@ TEST_F(RedBlackTreeTest, in_order_iterators) {
 
 TEST_F(RedBlackTreeTest, in_order_iterators_last) {
   iree_tree_node_t* node;
-  iree_tree_insert(tree_, 10, &node);
-  iree_tree_insert(tree_, 20, &node);
-  iree_tree_insert(tree_, 30, &node);
+  iree_tree_insert(&tree_, 10, &node);
+  iree_tree_insert(&tree_, 20, &node);
+  iree_tree_insert(&tree_, 30, &node);
 
   std::vector<int> keys;
-  for (iree_tree_node_t* node = iree_tree_last(tree_); node != nullptr;
+  for (iree_tree_node_t* node = iree_tree_last(&tree_); node != nullptr;
        node = iree_tree_node_prev(node)) {
     keys.push_back(iree_tree_node_get_key(node));
   }
@@ -127,9 +127,9 @@ class RedBlackTreeWalkTest
 
 TEST_P(RedBlackTreeWalkTest, walk) {
   iree_tree_node_t* node;
-  iree_tree_insert(tree_, 10, &node);
-  iree_tree_insert(tree_, 20, &node);
-  iree_tree_insert(tree_, 30, &node);
+  iree_tree_insert(&tree_, 10, &node);
+  iree_tree_insert(&tree_, 20, &node);
+  iree_tree_insert(&tree_, 30, &node);
 
   std::vector<int> keys;
   auto callback = [](iree_tree_node_t* node, void* user_data) -> bool {
@@ -137,7 +137,7 @@ TEST_P(RedBlackTreeWalkTest, walk) {
     keys->push_back(iree_tree_node_get_key(node));
     return true;
   };
-  iree_tree_walk(tree_, GetParam(), callback, &keys);
+  iree_tree_walk(&tree_, GetParam(), callback, &keys);
 
   if (GetParam() == IREE_TREE_WALK_INORDER) {
     EXPECT_EQ(keys.size(), 3);

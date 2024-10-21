@@ -24,14 +24,34 @@ typedef enum iree_tree_walk_type_e {
   IREE_TREE_WALK_POSTORDER,
 } iree_tree_walk_type_e;
 
+typedef struct iree_tree_node_t iree_tree_node_t;
+typedef struct iree_tree_node_t {
+  bool red;
+  iree_tree_node_t* left;
+  iree_tree_node_t* right;
+  iree_tree_node_t* parent;
+  iree_host_size_t key;
+  bool is_sentinel;
+  uint8_t* data;
+} iree_tree_node_t;
+
+typedef struct iree_tree_t {
+  uint32_t element_size;
+  iree_allocator_t allocator;
+  iree_tree_node_t* root;
+  iree_host_size_t size;
+  iree_tree_node_t* cache;  // Cache for deleted nodes
+  iree_tree_node_t nil;
+} iree_tree_t;
+
 void* iree_tree_node_get_data(iree_tree_node_t* node);
 iree_host_size_t iree_tree_node_get_key(iree_tree_node_t* node);
 
-iree_status_t iree_tree_create(iree_allocator_t allocator,
-                               iree_host_size_t element_size,
-                               iree_tree_t** out);
+iree_status_t iree_tree_initialize(iree_allocator_t allocator,
+                                   iree_host_size_t element_size,
+                                   iree_tree_t* tree);
 uint32_t iree_tree_get_data_size(iree_tree_t* tree);
-void iree_tree_free(iree_tree_t* tree);
+void iree_tree_deinitialize(iree_tree_t* tree);
 iree_status_t iree_tree_insert(iree_tree_t* tree, iree_host_size_t key,
                                iree_tree_node_t** out_data);
 iree_host_size_t iree_tree_size(iree_tree_t* tree);

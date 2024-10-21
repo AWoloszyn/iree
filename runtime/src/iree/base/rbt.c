@@ -11,41 +11,54 @@
 #include "iree/base/config.h"
 #include "stdint.h"
 
-typedef struct iree_tree_node_t iree_tree_node_t;
-typedef struct iree_tree_node_t {
-  bool red;
-  iree_tree_node_t* left;
-  iree_tree_node_t* right;
-  iree_tree_node_t* parent;
-  iree_host_size_t key;
-  bool is_sentinel;
-  uint8_t data[];
-} iree_tree_node_t;
+iree_status_t iree_tree_initialize(iree_allocator_t allocator,
+                                   iree_host_size_t element_size,
+                                   iree_tree_t* tree) {
+  tree->element_size = element_size;
+  tree->allocator = allocator;
+  tree->root = &tree->nil;
+  tree->size = 0;
+  tree->cache = NULL;  // Initialize cache
+  tree->nil.is_sentinel = true;
+  return iree_ok_status();
+}
 
-typedef struct iree_tree_t {
-  uint32_t element_size;
-  iree_allocator_t allocator;
-  iree_tree_node_t* root;
-  iree_host_size_t size;
-  iree_tree_node_t nil;
-} iree_tree_t;
-
-iree_status_t iree_tree_create(iree_allocator_t allocator,
-                               iree_host_size_t element_size,
-                               iree_tree_t** out) {
-  iree_tree_t* t;
-  iree_status_t status =
-      iree_allocator_malloc(allocator, sizeof(iree_tree_t), (void**)&t);
-  if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
-    return status;
+iree_tree_node_t* iree_tree_get_node_from_cache(iree_tree_t* tree) {
+  if (tree->cache) {
+    iree_tree_node_t* node = tree->cache;
+    tree->cache = node->right;
+    return node;
   }
-  t->element_size = element_size;
-  t->allocator = allocator;
-  t->root = &t->nil;
-  t->size = 0;
-  t->nil.is_sentinel = true;
-  *out = t;
-  return status;
+  return NULL;
+}
+
+void iree_tree_add_node_to_cache(iree_tree_t* tree, iree_tree_node_t* node) {
+  node->right = tree->cache;
+  tree->cache = node;
+}
+
+void iree_tree_delete_node(iree_tree_t* tree, iree_tree_node_t* node) {
+  if (node != &tree->nil) {
+    iree_tree_add_node_to_cache(tree, node);
+  }
+}
+
+iree_status_t iree_tree_allocate_node(iree_tree_t* tree,
+                                      iree_tree_node_t** out_node) {
+  iree_tree_node_t* node = iree_tree_get_node_from_cache(tree);
+  if (node) {
+    memset(node, 0, sizeof(iree_tree_node_t) + tree->element_size);
+  } else {
+    iree_status_t status = iree_allocator_malloc(
+        tree->allocator, sizeof(iree_tree_node_t) + tree->element_size,
+        (void**)&node);
+    if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
+      return status;
+    }
+  }
+  *out_node = node;
+  node->data = (uint8_t*)node + sizeof(iree_tree_node_t);
+  return iree_ok_status();
 }
 
 iree_host_size_t iree_tree_size(iree_tree_t* tree) { return tree->size; }
@@ -56,8 +69,23 @@ bool iree_tree_free_node(iree_tree_node_t* node, void* user_data) {
   return true;
 }
 
-void iree_tree_free(iree_tree_t* tree) {
+void iree_tree_deinitialize(iree_tree_t* tree) {
   iree_tree_walk(tree, IREE_TREE_WALK_POSTORDER, iree_tree_free_node, tree);
+
+  // Free cache nodes
+  iree_tree_node_t* node = tree->cache;
+  while (node) {
+    iree_tree_node_t* next = node->right;
+    iree_allocator_free(tree->allocator, node);
+    node = next;
+  }
+
+  // Reset the tree structure
+  tree->root = &tree->nil;
+  memset(&tree->nil, 0, sizeof(iree_tree_node_t));
+  tree->nil.is_sentinel = true;
+  tree->size = 0;
+  tree->cache = NULL;
 }
 
 void iree_tree_rotate_left(iree_tree_t* tree, iree_tree_node_t* x) {
@@ -182,9 +210,7 @@ iree_status_t iree_tree_insert_internal(iree_tree_t* tree, iree_host_size_t key,
 iree_status_t iree_tree_insert(iree_tree_t* tree, iree_host_size_t key,
                                iree_tree_node_t** out_data) {
   iree_tree_node_t* t;
-  iree_status_t status = iree_allocator_malloc(
-      tree->allocator, sizeof(iree_tree_node_t) + tree->element_size,
-      (void**)&t);
+  iree_status_t status = iree_tree_allocate_node(tree, &t);
   if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
     return status;
   }
@@ -464,7 +490,7 @@ void iree_tree_remove(iree_tree_t* tree, iree_tree_node_t* z) {
 
 void iree_tree_erase(iree_tree_t* tree, iree_tree_node_t* node) {
   iree_tree_remove(tree, node);
-  iree_allocator_free(tree->allocator, node);
+  iree_tree_delete_node(tree, node);
   tree->size--;
 }
 
