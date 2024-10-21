@@ -104,7 +104,11 @@ iree_status_t iree_hal_hip_timepoint_pool_acquire_host_wait(
     iree_hal_hip_timepoint_t** out_timepoints);
 iree_status_t iree_hal_hip_timepoint_pool_acquire_device_signal(
     iree_hal_hip_timepoint_pool_t* timepoint_pool,
-    iree_host_size_t timepoint_count, uint64_t device_index,
+    iree_host_size_t timepoint_count,
+    iree_hal_hip_timepoint_t** out_timepoints);
+iree_status_t iree_hal_hip_timepoint_pool_acquire_device_wait(
+    iree_hal_hip_timepoint_pool_t* timepoint_pool,
+    iree_host_size_t timepoint_count,
     iree_hal_hip_timepoint_t** out_timepoints);
 
 // Releases one or more timepoints back to the timepoint pool.

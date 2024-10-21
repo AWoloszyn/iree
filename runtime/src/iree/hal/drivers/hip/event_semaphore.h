@@ -19,7 +19,7 @@
 extern "C" {
 #endif  // __cplusplus
 
-typedef iree_status_t (*iree_hal_hip_devent_issue_work_cb)(void* user_data);
+typedef struct iree_hal_hip_event_t iree_hal_hip_event_t;
 
 // Creates an IREE HAL semaphore with the given |initial_value|.
 //
@@ -27,14 +27,10 @@ typedef iree_status_t (*iree_hal_hip_devent_issue_work_cb)(void* user_data);
 // different timepoints along the timeline under the hood. Those timepoints will
 // be allocated from the |timepoint_pool|.
 //
-// This semaphore is meant to be used together with a pending queue actions; it
-// may advance the given |work_queue| if new values are signaled.
-//
 // Thread-safe; multiple threads may signal/wait values on the same semaphore.
 iree_status_t iree_hal_hip_event_semaphore_create(
     uint64_t initial_value, const iree_hal_hip_dynamic_symbols_t* symbols,
-    iree_hal_hip_timepoint_pool_t* timepoint_pool,
-    iree_hal_hip_devent_issue_work_cb issue_work_cb, void* issue_work_user_data,
+    //
     iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore);
 
 // Acquires a timepoint to signal the timeline to the given |to_value| from the

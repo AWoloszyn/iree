@@ -164,9 +164,9 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
-    name = "indexable_deque",
-    srcs = ["indexable_deque.c"],
-    hdrs = ["indexable_deque.h"],
+    name = "queue",
+    srcs = ["queue.c"],
+    hdrs = ["queue.h"],
     deps = [
         ":base",
         "//runtime/src/iree/base/internal",
@@ -175,13 +175,13 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
-    name = "indexable_deque_test",
+    name = "queue_test",
     srcs = [
-        "indexable_deque_test.cc",
+        "queue_test.cc",
     ],
     deps = [
         ":base",
-        ":indexable_deque",
+        ":queue",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

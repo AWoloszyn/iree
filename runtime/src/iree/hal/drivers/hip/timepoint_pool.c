@@ -269,6 +269,32 @@ iree_status_t iree_hal_hip_timepoint_pool_acquire_device_signal(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_hip_timepoint_pool_acquire_device_wait(
+    iree_hal_hip_timepoint_pool_t* timepoint_pool,
+    iree_host_size_t timepoint_count,
+    iree_hal_hip_timepoint_t** out_timepoints) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Acquire device events to wrap up. This should happen before acquiring the
+  // timepoints to avoid nested locks.
+  iree_hal_hip_event_t** device_events = iree_alloca(
+      timepoint_count * sizeof((*out_timepoints)->timepoint.device_wait));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_hip_event_pool_acquire(timepoint_pool->device_event_pool,
+                                          timepoint_count, device_events));
+
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_hip_timepoint_pool_acquire_internal(
+              timepoint_pool, timepoint_count, out_timepoints));
+  for (iree_host_size_t i = 0; i < timepoint_count; ++i) {
+    out_timepoints[i]->kind = IREE_HAL_HIP_TIMEPOINT_KIND_DEVICE_WAIT;
+    out_timepoints[i]->timepoint.device_wait = device_events[i];
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
 void iree_hal_hip_timepoint_pool_release(
     iree_hal_hip_timepoint_pool_t* timepoint_pool,
     iree_host_size_t timepoint_count, iree_hal_hip_timepoint_t** timepoints) {

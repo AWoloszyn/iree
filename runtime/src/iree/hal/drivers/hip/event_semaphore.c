@@ -8,40 +8,41 @@
 
 #include "iree/base/internal/synchronization.h"
 #include "iree/base/internal/wait_handle.h"
+#include "iree/base/queue.h"
 #include "iree/base/status.h"
 #include "iree/hal/drivers/hip/dynamic_symbols.h"
 #include "iree/hal/drivers/hip/timepoint_pool.h"
 #include "iree/hal/utils/semaphore_base.h"
 
+IREE_TYPED_QUEUE_WRAPPER(iree_hal_hip_semaphore_event_queue,
+                         iree_hal_hip_event_t*, 8);
+
 typedef struct iree_hal_hip_semaphore_t {
   // Abstract resource used for injecting reference counting and vtable;
   // must be at offset 0.
-  iree_hal_semaphore_t base;
+  iree_hal_resource_t base;
 
   // The allocator used to create this semaphore.
   iree_allocator_t host_allocator;
   // The symbols used to issue HIP API calls.
   const iree_hal_hip_dynamic_symbols_t* symbols;
 
-  // The timepoint pool to acquire timepoint objects.
-  iree_hal_hip_timepoint_pool_t* timepoint_pool;
+  // The queue of hip events that back any GPU signals of this semaphore.
+  iree_hal_hip_semaphore_event_queue_t event_queue;
 
-  // Callback and user data to ask the device to issue
-  // additional work to the work queue(s).
-  iree_hal_hip_devent_issue_work_cb issue_work_cb;
-  void* issue_work_user_data;
+  // Notify any potential CPU waiters that this semaphore
+  // has changed state.
+  iree_notification_t state_notification;
 
-  // Guards value and status. We expect low contention on semaphores and since
-  // iree_slim_mutex_t is (effectively) just a CAS this keeps things simpler
-  // than trying to make the entire structure lock-free.
-  // If we need to hold mutex and base.timepoint_mutex locked together, the
-  // locking order must be (mutex, base.timepoint_mutex).
   iree_slim_mutex_t mutex;
+  // The maximum value that this semaphore has been signaled to.
+  // This means this semaphore is guaranteed to make forward progress
+  // until that semaphore is hit, as all signaling operations have
+  // been made available.
+  uint64_t max_value_to_be_signaled IREE_GUARDED_BY(mutex);
 
-  // Current signaled value. May be IREE_HAL_SEMAPHORE_FAILURE_VALUE to
-  // indicate that the semaphore has been signaled for failure and
-  // |failure_status| contains the error.
-  uint64_t current_value IREE_GUARDED_BY(mutex);
+  // The largest value that has been observed by the host.
+  uint64_t current_visible_value IREE_GUARDED_BY(mutex);
 
   // OK or the status passed to iree_hal_semaphore_fail. Owned by the semaphore.
   iree_status_t failure_status IREE_GUARDED_BY(mutex);
@@ -57,12 +58,8 @@ static iree_hal_hip_semaphore_t* iree_hal_hip_semaphore_cast(
 
 iree_status_t iree_hal_hip_event_semaphore_create(
     uint64_t initial_value, const iree_hal_hip_dynamic_symbols_t* symbols,
-    iree_hal_hip_timepoint_pool_t* timepoint_pool,
-    iree_hal_hip_devent_issue_work_cb issue_work_cb, void* issue_work_user_data,
     iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore) {
   IREE_ASSERT_ARGUMENT(symbols);
-  IREE_ASSERT_ARGUMENT(timepoint_pool);
-  IREE_ASSERT_ARGUMENT(issue_work_cb);
   IREE_ASSERT_ARGUMENT(out_semaphore);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -75,11 +72,13 @@ iree_status_t iree_hal_hip_event_semaphore_create(
                                 &semaphore->base);
   semaphore->host_allocator = host_allocator;
   semaphore->symbols = symbols;
-  semaphore->timepoint_pool = timepoint_pool;
-  semaphore->issue_work_cb = issue_work_cb;
-  semaphore->issue_work_user_data = issue_work_user_data;
+  iree_hal_hip_semaphore_event_queue_initialize(&semaphore->event_queue,
+                                                host_allocator);
+  iree_notification_initialize(&semaphore->state_notification);
+
   iree_slim_mutex_initialize(&semaphore->mutex);
-  semaphore->current_value = initial_value;
+  semaphore->current_visible_value = initial_value;
+  semaphore->max_value_to_be_signaled = initial_value;
   semaphore->failure_status = iree_ok_status();
 
   *out_semaphore = &semaphore->base;
@@ -98,6 +97,12 @@ static void iree_hal_hip_semaphore_destroy(
   iree_status_ignore(semaphore->failure_status);
   iree_slim_mutex_deinitialize(&semaphore->mutex);
 
+  iree_notification_deinitialize(&working_area->state_notification);
+  for (iree_host_size_t i = 0; i < semaphore->event_queue.element_count; ++i) {
+    iree_hal_hip_event_release(
+        iree_hal_hip_semaphore_event_queue_at(&semaphore->event_queue, i));
+  }
+  iree_hal_hip_semaphore_event_queue_deinitialize(&semaphore->event_queue);
   iree_hal_semaphore_deinitialize(&semaphore->base);
   iree_allocator_free(host_allocator, semaphore);
 
@@ -112,7 +117,29 @@ static iree_status_t iree_hal_hip_semaphore_query(
 
   iree_slim_mutex_lock(&semaphore->mutex);
 
-  *out_value = semaphore->current_value;
+  *out_value = semaphore->current_visible_value;
+  for (uint64_t i = 0; i < semaphore->event_queue.element_count; ++i) {
+    iree_status_t status = IREE_HIP_RESULT_TO_STATUS(
+        semaphore->symbols, hipEventQuery(iree_hal_hip_event_handle(
+                                iree_hal_hip_semaphore_event_queue_at(
+                                    &semaphore->event_queue, i))));
+    if (iree_status_is_ok(status)) {
+      *out_value += 1;
+    } else {
+      break;
+    }
+  }
+
+  for (uint64_t i = semaphore->current_visible_value; i < *out_value; ++i) {
+    iree_hal_hip_event_release(
+        iree_hal_hip_semaphore_event_queue_at(&semaphore->event_queue, 0));
+    iree_hal_hip_semaphore_event_queue_pop_front(&semaphore->event_queue, 1);
+  }
+
+  if (semaphore->current_visible_value < *out_value) {
+    semaphore->current_visible_value = *out_value;
+    iree_notification_post(&semaphore->state_notification, IREE_ALL_WAITERS);
+  }
 
   iree_status_t status = iree_ok_status();
   if (*out_value >= IREE_HAL_SEMAPHORE_FAILURE_VALUE) {

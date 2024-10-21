@@ -21,6 +21,8 @@ iree_cc_library(
     "loop.h"
     "loop_inline.c"
     "loop_inline.h"
+    "rbt.h"
+    "rbt.c"
     "status.c"
     "status.h"
     "status_cc.h"
@@ -152,11 +154,11 @@ iree_cc_test(
 
 iree_cc_library(
   NAME
-    indexable_deque
+    queue
   HDRS
-    "indexable_deque.h"
+    "queue.h"
   SRCS
-    "indexable_deque.c"
+    "queue.c"
   DEPS
     ::base
     iree::base::internal
@@ -166,16 +168,26 @@ iree_cc_library(
 
 iree_cc_test(
   NAME
-    indexable_deque_test
+    queue_test
   SRCS
-    "indexable_deque_test.cc"
+    "queue_test.cc"
   DEPS
     ::base
-    ::indexable_deque
+    ::queue
     iree::testing::gtest
     iree::testing::gtest_main
 )
 
+iree_cc_test(
+  NAME
+    rbt_test
+  SRCS
+    "rbt_test.cc"
+  DEPS
+    ::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
 
 if(EMSCRIPTEN)
   iree_cc_library(
