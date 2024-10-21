@@ -19,6 +19,7 @@ iree_status_t iree_tree_initialize(iree_allocator_t allocator,
   tree->root = &tree->nil;
   tree->size = 0;
   tree->cache = NULL;  // Initialize cache
+  memset(&tree->nil, 0x00, sizeof(iree_tree_node_t));
   tree->nil.is_sentinel = true;
   return iree_ok_status();
 }
