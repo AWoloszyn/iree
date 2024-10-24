@@ -232,6 +232,36 @@ void iree_hal_stream_tracing_context_free(
   IREE_TRACE_ZONE_END(z0);
 }
 
+void iree_hal_stream_tracing_context_collect_list(
+    iree_hal_stream_tracing_context_t* context,
+    iree_hal_stream_tracing_context_event_list_t* event) {
+  if (!context) return;
+  IREE_ASSERT_ARGUMENT(event);
+  // Inner per-event loop.
+  while (event) {
+    uint32_t query_id = (uint32_t)(event - &context->event_pool[0]);
+    iree_status_t status =
+        context->device_interface->vtable->synchronize_native_event(
+            context->device_interface, event->event);
+    if (!iree_status_is_ok(status)) break;
+    status = context->device_interface->vtable->query_native_event(
+        context->device_interface, event->event);
+    if (!iree_status_is_ok(status)) break;
+
+    // Calculate context-relative time and notify tracy.
+    float relative_millis = 0.0f;
+    context->device_interface->vtable->event_elapsed_time(
+        context->device_interface, &relative_millis, context->base_event,
+        event->event);
+
+    int64_t gpu_timestamp = (int64_t)((double)relative_millis * 1000000.0);
+
+    iree_tracing_gpu_zone_notify(context->id, query_id, gpu_timestamp);
+    read_query_count += 1;
+    event = event->next_in_command_buffer;
+  }
+}
+
 void iree_hal_stream_tracing_context_collect(
     iree_hal_stream_tracing_context_t* context) {
   if (!context) return;
@@ -252,29 +282,7 @@ void iree_hal_stream_tracing_context_collect(
   // Outer per-command_buffer loop.
   while (events) {
     iree_hal_stream_tracing_context_event_t* event = events;
-    // Inner per-event loop.
-    while (event) {
-      uint32_t query_id = (uint32_t)(event - &context->event_pool[0]);
-      iree_status_t status =
-          context->device_interface->vtable->synchronize_native_event(
-              context->device_interface, event->event);
-      if (!iree_status_is_ok(status)) break;
-      status = context->device_interface->vtable->query_native_event(
-          context->device_interface, event->event);
-      if (!iree_status_is_ok(status)) break;
-
-      // Calculate context-relative time and notify tracy.
-      float relative_millis = 0.0f;
-      context->device_interface->vtable->event_elapsed_time(
-          context->device_interface, &relative_millis, context->base_event,
-          event->event);
-
-      int64_t gpu_timestamp = (int64_t)((double)relative_millis * 1000000.0);
-
-      iree_tracing_gpu_zone_notify(context->id, query_id, gpu_timestamp);
-      read_query_count += 1;
-      event = event->next_in_command_buffer;
-    }
+    iree_hal_stream_tracing_conext_collect_list(context, event);
     iree_hal_stream_tracing_context_event_t* next = events->next_submission;
     events->was_submitted = true;
     events = next;

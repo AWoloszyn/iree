@@ -141,6 +141,15 @@ void iree_hal_stream_tracing_notify_submitted(
     iree_hal_stream_tracing_context_t* context,
     iree_hal_stream_tracing_context_event_list_t* event_list);
 
+// Alternatively, if you don't want the stream tracing to manually
+// handle collecting events, (because it may cause more blocking than
+// you would prefer), you can manually collect the events for
+// a specific event list so long as you never notified the submission.
+// You must still free the events to release them back into the context.
+void iree_hal_stream_tracing_context_collect_list(
+    iree_hal_stream_tracing_context_t* context,
+    iree_hal_stream_tracing_context_event_t* event_list_head);
+
 // Frees the events and returns them back into the tracing context.
 void iree_hal_stream_tracing_free(
     iree_hal_stream_tracing_context_t* context,
