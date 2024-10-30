@@ -21,8 +21,8 @@ iree_cc_library(
     "loop.h"
     "loop_inline.c"
     "loop_inline.h"
-    "rbt.h"
-    "rbt.c"
+    "tree.h"
+    "tree.c"
     "status.c"
     "status.h"
     "status_cc.h"
@@ -180,9 +180,9 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
-    rbt_test
+    tree_test
   SRCS
-    "rbt_test.cc"
+    "tree_test.cc"
   DEPS
     ::base
     iree::testing::gtest

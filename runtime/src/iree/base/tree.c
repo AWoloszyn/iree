@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/base/rbt.h"
+#include "iree/base/tree.h"
 
 #include "iree/base/allocator.h"
 #include "iree/base/assert.h"

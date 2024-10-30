@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_BASE_RBT_H
-#define IREE_BASE_RBT_H
+#ifndef IREE_BASE_TREE_H
+#define IREE_BASE_TREE_H
 
 #include "iree/base/allocator.h"
 #include "iree/base/config.h"
@@ -79,4 +79,4 @@ void iree_tree_erase(iree_tree_t* tree, iree_tree_node_t* node);
 }  // extern "C"
 #endif  // __cplusplus
 
-#endif  // IREE_BASE_RBT_H
+#endif  // IREE_BASE_TREE_H
