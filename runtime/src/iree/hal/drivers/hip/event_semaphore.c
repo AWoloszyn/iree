@@ -593,6 +593,7 @@ iree_status_t iree_hal_hip_semaphore_notify_work(
   if (callback) {
     status = callback(user_data, base_semaphore, status);
   }
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
@@ -662,6 +663,8 @@ iree_status_t iree_hal_hip_semaphore_get_hip_event(
   iree_hal_hip_event_retain(event);
   *out_hip_event = event;
   iree_slim_mutex_unlock(&semaphore->mutex);
+  IREE_TRACE_ZONE_END(z0);
+
   return iree_ok_status();
 }
 

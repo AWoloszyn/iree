@@ -1059,6 +1059,7 @@ typedef struct iree_hal_hip_device_group_semaphore_submit_callback_data_t {
 
 static iree_status_t iree_hal_hip_device_group_device_complete_submission(
     void* user_data, iree_hal_hip_event_t* event, iree_status_t status) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   iree_hal_hip_device_group_semaphore_submit_callback_data_t* data =
       (iree_hal_hip_device_group_semaphore_submit_callback_data_t*)user_data;
   iree_hal_hip_device_group_device_t* device = data->device;
@@ -1069,6 +1070,12 @@ static iree_status_t iree_hal_hip_device_group_device_complete_submission(
   // 1) Read any tracing events that were submitted.
   for (iree_host_size_t i = 0; i < data->command_buffer_count; ++i) {
     iree_hal_command_buffer_t* command_buffer = data->command_buffers[i];
+    if (iree_hal_hip_device_group_command_buffer_isa(command_buffer)) {
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_hal_hip_device_group_command_buffer_get(
+                  command_buffer, data->queue_affinity, &command_buffer));
+    }
+
     if (iree_hal_hip_stream_command_buffer_isa(command_buffer)) {
       iree_hal_stream_tracing_context_collect_list(
           // Get the tracing context from the device/stream/queue affinity.
@@ -1102,6 +1109,7 @@ static iree_status_t iree_hal_hip_device_group_device_complete_submission(
   iree_hal_resource_set_free(data->resource_set);
   iree_slim_mutex_deinitialize(&data->status_mutex);
   iree_allocator_free(device->host_allocator, data);
+  IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
 
@@ -1131,6 +1139,7 @@ static iree_status_t iree_hal_hip_device_group_execute_now(
           data->device->hip_symbols,
           hipCtxPushCurrent(data->device->device_contexts[idx].hip_context)));
 
+  IREE_TRACE_ZONE_BEGIN_NAMED(z2, "Enqueue semaphore wait");
   // TODO(awoloszyn): Because of how hip works, if we only have a single
   // device in the device_group we could avoid waiting on any of these
   // semaphores, we are guaranteed to have waits, but if we want this
@@ -1150,6 +1159,7 @@ static iree_status_t iree_hal_hip_device_group_execute_now(
       continue;
     }
 
+    IREE_TRACE_ZONE_BEGIN_NAMED(z1, "hipStreamWaitEvent");
     status = iree_status_join(
         status,
         IREE_HIP_RESULT_TO_STATUS(
@@ -1157,7 +1167,9 @@ static iree_status_t iree_hal_hip_device_group_execute_now(
             hipStreamWaitEvent(device->device_contexts[idx].hip_dispatch_stream,
                                iree_hal_hip_event_handle(event), 0)));
     iree_hal_hip_event_release(event);
+    IREE_TRACE_ZONE_END(z1);
   }
+  IREE_TRACE_ZONE_END(z2);
   if (!iree_status_is_ok(status)) {
     IREE_TRACE_ZONE_END(z0);
     return status;
@@ -1165,6 +1177,7 @@ static iree_status_t iree_hal_hip_device_group_execute_now(
 
   // We have satisfied all of the waits.
 
+  IREE_TRACE_ZONE_BEGIN_NAMED(z3, "Launch");
   for (iree_host_size_t i = 0;
        i < data->command_buffer_count && iree_status_is_ok(status); ++i) {
     iree_hal_command_buffer_t* command_buffer = data->command_buffers[i];
@@ -1196,6 +1209,7 @@ static iree_status_t iree_hal_hip_device_group_execute_now(
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, iree_hal_deferred_command_buffer_apply(
                   command_buffer, stream_command_buffer, binding_table));
+      data->command_buffers[i] = stream_command_buffer;
     } else if (iree_hal_hip_stream_command_buffer_isa(command_buffer)) {
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0,
@@ -1206,15 +1220,20 @@ static iree_status_t iree_hal_hip_device_group_execute_now(
           iree_hal_resource_set_insert(data->resource_set, 1, &command_buffer));
       hipGraphExec_t exec =
           iree_hal_hip_graph_command_buffer_handle(command_buffer);
+      IREE_TRACE_ZONE_BEGIN_NAMED(z3, "HipGraphLaunch");
       status = IREE_HIP_RESULT_TO_STATUS(
           data->device->hip_symbols,
           hipGraphLaunch(exec,
                          device->device_contexts[idx].hip_dispatch_stream));
+      IREE_TRACE_ZONE_END(z3);
     } else {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "unsupported command buffer type");
     }
   }
+  IREE_TRACE_ZONE_END(z3);
+
+  IREE_TRACE_ZONE_BEGIN_NAMED(z4, "Record completion semaphores");
 
   for (iree_host_size_t i = 0; i < data->signal_semaphore_list.count; ++i) {
     iree_hal_hip_event_t* event;
@@ -1233,13 +1252,17 @@ static iree_status_t iree_hal_hip_device_group_execute_now(
                        device->device_contexts[idx].hip_dispatch_stream));
     iree_hal_hip_event_release(event);
   }
+  IREE_TRACE_ZONE_END(z4);
 
+  IREE_TRACE_ZONE_BEGIN_NAMED(z5, "Notify semaphore forward progress");
   for (iree_host_size_t i = 0; i < data->signal_semaphore_list.count; ++i) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_hip_semaphore_notify_forward_progress_to(
                 data->signal_semaphore_list.semaphores[i],
                 data->signal_semaphore_list.payload_values[i]));
   }
+  IREE_TRACE_ZONE_END(z5);
+  IREE_TRACE_ZONE_BEGIN_NAMED(z6, "Record cleanup semaphore");
 
   iree_hal_hip_event_t* event;
 
@@ -1254,12 +1277,16 @@ static iree_status_t iree_hal_hip_device_group_execute_now(
           hipEventRecord(iree_hal_hip_event_handle(event),
                          device->device_contexts[idx].hip_dispatch_stream)));
 
+  // Data may get deleted any time after adding it to the cleanup,
+  // so retain the symbols here.
+  const iree_hal_hip_dynamic_symbols_t* symbols = data->device->hip_symbols;
+
   iree_hal_hip_cleanup_thread_add_cleanup(
       device->cleanup_thread, event,
       &iree_hal_hip_device_group_device_complete_submission, data);
+  IREE_TRACE_ZONE_END(z6);
 
-  status = IREE_HIP_RESULT_TO_STATUS(data->device->hip_symbols,
-                                     hipCtxPopCurrent(NULL));
+  status = IREE_HIP_RESULT_TO_STATUS(symbols, hipCtxPopCurrent(NULL));
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -1474,7 +1501,7 @@ static iree_status_t iree_hal_hip_device_group_device_queue_execute(
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(device->host_allocator, callback_data);
   }
-
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 

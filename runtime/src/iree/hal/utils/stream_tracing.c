@@ -232,7 +232,7 @@ void iree_hal_stream_tracing_context_free(
   IREE_TRACE_ZONE_END(z0);
 }
 
-void iree_hal_stream_tracing_context_collect_list(
+void iree_hal_stream_tracing_context_collect_list_internal(
     iree_hal_stream_tracing_context_t* context,
     iree_hal_stream_tracing_context_event_t* event) {
   if (!context) return;
@@ -261,6 +261,34 @@ void iree_hal_stream_tracing_context_collect_list(
   }
 }
 
+void iree_hal_stream_tracing_context_collect_list(
+    iree_hal_stream_tracing_context_t* context,
+    iree_hal_stream_tracing_context_event_t* event) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_slim_mutex_lock(&context->event_mutex);
+  iree_hal_stream_tracing_context_collect_list_internal(context, event);
+  iree_hal_stream_tracing_context_event_t* events =
+      context->submitted_event_list.head;
+  iree_hal_stream_tracing_context_event_t* last_events = events;
+  if (events == event) {
+    context->submitted_event_list.head = events->next_submission;
+  }
+
+  while (events) {
+    if (events == event) {
+      // Remove these events from the list.
+      last_events->next_submission = events->next_submission;
+      break;
+    }
+    last_events = events;
+    events = events->next_submission;
+  }
+
+  event->was_submitted = true;
+  iree_slim_mutex_unlock(&context->event_mutex);
+  IREE_TRACE_ZONE_END(z0);
+}
+
 void iree_hal_stream_tracing_context_collect(
     iree_hal_stream_tracing_context_t* context) {
   if (!context) return;
@@ -280,7 +308,7 @@ void iree_hal_stream_tracing_context_collect(
   // Outer per-command_buffer loop.
   while (events) {
     iree_hal_stream_tracing_context_event_t* event = events;
-    iree_hal_stream_tracing_context_collect_list(context, event);
+    iree_hal_stream_tracing_context_collect_list_internal(context, event);
     iree_hal_stream_tracing_context_event_t* next = events->next_submission;
     events->was_submitted = true;
     events = next;
