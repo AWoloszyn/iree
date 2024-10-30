@@ -1053,6 +1053,8 @@ typedef struct iree_hal_hip_device_group_semaphore_submit_callback_data_t {
   iree_hal_semaphore_list_t wait_semaphore_list;
   iree_hal_semaphore_list_t signal_semaphore_list;
   iree_hal_resource_set_t* resource_set;
+  iree_slim_mutex_t status_mutex;
+  iree_status_t status;
 } iree_hal_hip_device_group_semaphore_submit_callback_data_t;
 
 static iree_status_t iree_hal_hip_device_group_device_complete_submission(
@@ -1098,6 +1100,7 @@ static iree_status_t iree_hal_hip_device_group_device_complete_submission(
   // 4) Free the iree_hal_hip_device_group_semaphore_submit_callback_data_t and
   // the resource set attached.
   iree_hal_resource_set_free(data->resource_set);
+  iree_slim_mutex_deinitialize(&data->status_mutex);
   iree_allocator_free(device->host_allocator, data);
   return iree_ok_status();
 }
@@ -1109,6 +1112,16 @@ static iree_status_t iree_hal_hip_device_group_execute_now(
                  "Cannot execute a command buffer on more than one queue");
   iree_hal_hip_device_group_device_t* device = data->device;
   iree_status_t status = iree_ok_status();
+
+  // If we had a semaphore failure, then we should propagate it
+  // but not run anything
+  if (!iree_status_is_ok(data->status)) {
+    for (iree_host_size_t i = 0; i < data->signal_semaphore_list.count; ++i) {
+      iree_hal_semaphore_fail(data->signal_semaphore_list.semaphores[i],
+                              iree_status_clone(data->status));
+    }
+    return data->status;
+  }
 
   uint32_t idx = iree_math_count_trailing_zeros_u64(data->queue_affinity);
 
@@ -1256,12 +1269,15 @@ static iree_status_t iree_hal_hip_device_group_semaphore_submit_callback(
     void* user_context, iree_hal_semaphore_t* semaphore, iree_status_t status) {
   iree_hal_hip_device_group_semaphore_submit_callback_data_t* data =
       (iree_hal_hip_device_group_semaphore_submit_callback_data_t*)user_context;
+  if (!iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&data->status_mutex);
+    data->status = iree_status_join(data->status, status);
+    iree_slim_mutex_unlock(&data->status_mutex);
+  }
   if (iree_atomic_ref_count_dec(&data->wait_semaphore_count) != 1) {
     return iree_ok_status();
   }
-  if (!iree_status_is_ok(status)) {
-    return status;
-  }
+
   // Now the actual submit happens, as all semaphore have been satisfied
   // (by satisfied here, we specifically mean that the semaphore has been
   // scheduled, not necessarily completed)
@@ -1402,6 +1418,8 @@ static iree_status_t iree_hal_hip_device_group_make_callback_data(
   } else {
     callback_data->binding_tables = NULL;
   }
+  callback_data->status = iree_ok_status();
+  iree_slim_mutex_initialize(&callback_data->status_mutex);
   *out_data = callback_data;
   IREE_TRACE_ZONE_END(z0);
   return status;

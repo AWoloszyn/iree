@@ -123,12 +123,15 @@ static iree_status_t iree_hal_hip_event_semaphore_advance(
   iree_slim_mutex_lock(&semaphore->mutex);
   semaphore->max_value_to_be_signaled = iree_max(
       semaphore->max_value_to_be_signaled, semaphore->current_visible_value);
+  status =
+      iree_status_join(status, iree_status_clone(semaphore->failure_status));
   iree_slim_mutex_unlock(&semaphore->mutex);
   // Now that we have accumulated all of the work items, and we have
   // unlocked the semaphore, start running through the work items.
   while (work_item) {
     iree_hal_hip_semaphore_work_item_t* next_work_item = work_item->next;
-    work_item->scheduled_callback(work_item->user_data, base_semaphore, status);
+    work_item->scheduled_callback(work_item->user_data, base_semaphore,
+                                  iree_status_clone(status));
     iree_allocator_free(semaphore->host_allocator, work_item);
     work_item = next_work_item;
   }
@@ -304,7 +307,7 @@ static iree_status_t iree_hal_hip_semaphore_query_locked(
 
   iree_status_t status = iree_ok_status();
   if (*out_value >= IREE_HAL_SEMAPHORE_FAILURE_VALUE) {
-    status = iree_status_clone(semaphore->failure_status);
+    status = iree_make_status(IREE_STATUS_ABORTED, "Aborted");
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -321,9 +324,15 @@ static iree_status_t iree_hal_hip_semaphore_query(
 
   iree_status_t status =
       iree_hal_hip_semaphore_query_locked(semaphore, out_value);
-
   iree_slim_mutex_unlock(&semaphore->mutex);
-  iree_hal_hip_event_semaphore_advance(base_semaphore);
+  // If the status is aborted, we will pick up the real status from
+  // semaphore_advance.
+  if (iree_status_is_aborted(status)) {
+    iree_status_ignore(status);
+    status = iree_ok_status();
+  }
+  status = iree_status_join(
+      status, iree_hal_hip_event_semaphore_advance(base_semaphore));
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -394,11 +403,11 @@ static iree_status_t iree_hal_hip_semaphore_wait(
 
   const iree_time_t deadline_ns = iree_timeout_as_deadline_ns(timeout);
   iree_slim_mutex_lock(&semaphore->mutex);
-  uint64_t ignored_current_value;
+  uint64_t current_value = 0;
 
   // query_locked to make sure our count is up to date.
   iree_status_t status =
-      iree_hal_hip_semaphore_query_locked(semaphore, &ignored_current_value);
+      iree_hal_hip_semaphore_query_locked(semaphore, &current_value);
   if (!iree_status_is_ok(status)) {
     iree_slim_mutex_unlock(&semaphore->mutex);
     IREE_TRACE_ZONE_END(z0);
@@ -419,8 +428,7 @@ static iree_status_t iree_hal_hip_semaphore_wait(
     iree_slim_mutex_lock(&semaphore->mutex);
 
     // query_locked to make sure our count is up to date.
-    status =
-        iree_hal_hip_semaphore_query_locked(semaphore, &ignored_current_value);
+    status = iree_hal_hip_semaphore_query_locked(semaphore, &current_value);
     if (!iree_status_is_ok(status)) {
       iree_slim_mutex_unlock(&semaphore->mutex);
       IREE_TRACE_ZONE_END(z0);
@@ -467,7 +475,7 @@ static iree_status_t iree_hal_hip_semaphore_wait(
   iree_hal_hip_event_release(event);
   iree_slim_mutex_lock(&semaphore->mutex);
   if (semaphore->current_visible_value >= IREE_HAL_SEMAPHORE_FAILURE_VALUE) {
-    status = iree_status_clone(semaphore->failure_status);
+    status = iree_make_status(IREE_STATUS_ABORTED, "Aborted");
   }
   iree_slim_mutex_unlock(&semaphore->mutex);
   IREE_TRACE_ZONE_END(z0);
@@ -510,9 +518,14 @@ iree_status_t iree_hal_hip_semaphore_multi_wait(
         return iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED);
       }
       uint64_t value;
+      iree_hal_hip_semaphore_t* semaphore =
+          (iree_hal_hip_semaphore_t*)semaphore_list.semaphores[i];
+      iree_slim_mutex_lock(&semaphore->mutex);
+      // Lock and use query_locked here because we need the ABORTED error code,
+      // and query translates the error code to the failure error code.
       status = iree_status_join(
-          status,
-          iree_hal_semaphore_query(semaphore_list.semaphores[i], &value));
+          status, iree_hal_hip_semaphore_query_locked(semaphore, &value));
+      iree_slim_mutex_unlock(&semaphore->mutex);
       if (!iree_status_is_ok(status)) {
         IREE_TRACE_ZONE_END(z0);
         return status;
