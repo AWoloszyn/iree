@@ -1132,6 +1132,7 @@ static iree_status_t iree_hal_hip_device_group_execute_now(
   }
 
   uint32_t idx = iree_math_count_trailing_zeros_u64(data->queue_affinity);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, idx);
 
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
