@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_HAL_DRIVERS_HIP_DEVICE_GROUP_COMMAND_BUFFER_H__
-#define IREE_HAL_DRIVERS_HIP_DEVICE_GROUP_COMMAND_BUFFER_H__
+#ifndef IREE_HAL_DRIVERS_HIP_MULTI_DEVICE_COMMAND_BUFFER_H__
+#define IREE_HAL_DRIVERS_HIP_MULTI_DEVICE_COMMAND_BUFFER_H__
 
 #include "iree/base/api.h"
 #include "iree/hal/command_buffer.h"
@@ -26,9 +26,9 @@ typedef struct iree_arena_block_pool_t iree_arena_block_pool_t;
 // at a time based on the given queue affinity.
 //
 // After recording the underlying command buffers can be retrieved with
-// iree_hal_hip_device_group_command_buffer_get for submission.
+// iree_hal_hip_multi_device_command_buffer_get for submission.
 
-IREE_API_EXPORT iree_status_t iree_hal_hip_device_group_command_buffer_create(
+IREE_API_EXPORT iree_status_t iree_hal_hip_multi_device_command_buffer_create(
     iree_allocator_t host_allocator, uint32_t command_buffer_count,
     iree_hal_command_buffer_t** in_command_buffers,
     iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
@@ -40,11 +40,11 @@ IREE_API_EXPORT iree_status_t iree_hal_hip_device_group_command_buffer_create(
     iree_hal_command_buffer_t** out_command_buffer);
 
 // Returns true if |command_buffer| is a multi command buffer.
-IREE_API_EXPORT bool iree_hal_hip_device_group_command_buffer_isa(
+IREE_API_EXPORT bool iree_hal_hip_multi_device_command_buffer_isa(
     iree_hal_command_buffer_t* command_buffer);
 
 // Returns a recorded |command_buffer| with the given index
-IREE_API_EXPORT iree_status_t iree_hal_hip_device_group_command_buffer_get(
+IREE_API_EXPORT iree_status_t iree_hal_hip_multi_device_command_buffer_get(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_queue_affinity_t index,
     iree_hal_command_buffer_t** out_command_buffer);
@@ -53,4 +53,4 @@ IREE_API_EXPORT iree_status_t iree_hal_hip_device_group_command_buffer_get(
 }
 #endif  // __cplusplus
 
-#endif  // IREE_HAL_DRIVERS_HIP_DEVICE_GROUP_COMMAND_BUFFER_H__
+#endif  // IREE_HAL_DRIVERS_HIP_MULTI_DEVICE_COMMAND_BUFFER_H__

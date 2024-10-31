@@ -13,7 +13,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/hip/api.h"
 #include "iree/hal/drivers/hip/dynamic_symbols.h"
-#include "iree/hal/drivers/hip/hip_device_group_device.h"
+#include "iree/hal/drivers/hip/hip_device.h"
 #include "iree/hal/drivers/hip/rccl_dynamic_symbols.h"
 #include "iree/hal/drivers/hip/status_util.h"
 
@@ -374,7 +374,7 @@ static iree_status_t iree_hal_hip_driver_create_device_by_id(
   iree_string_view_t device_name = iree_make_cstring_view("hip");
 
   // Attempt to create the device now.
-  iree_status_t status = iree_hal_hip_device_group_device_create(
+  iree_status_t status = iree_hal_hip_device_create(
       base_driver, device_name, &driver->device_params, &driver->hip_symbols,
       &driver->nccl_symbols, 1, &device, host_allocator, out_device);
 
@@ -504,7 +504,7 @@ static iree_status_t iree_hal_hip_driver_get_device_id_by_path(
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "unsupported device path");
 }
 
-static iree_status_t iree_hal_hip_driver_create_device_group_device_by_ids(
+static iree_status_t iree_hal_hip_driver_create_multi_device_by_ids(
     iree_hal_driver_t* base_driver, iree_hal_device_id_t* device_ids,
     iree_host_size_t device_count, iree_host_size_t param_count,
     const iree_string_pair_t* params, iree_allocator_t host_allocator,
@@ -535,7 +535,7 @@ static iree_status_t iree_hal_hip_driver_create_device_group_device_by_ids(
   iree_string_view_t device_name = iree_make_cstring_view("hip");
 
   // Attempt to create the device now.
-  iree_status_t status = iree_hal_hip_device_group_device_create(
+  iree_status_t status = iree_hal_hip_device_create(
       base_driver, device_name, &driver->device_params, &driver->hip_symbols,
       &driver->nccl_symbols, device_count, devices, host_allocator, out_device);
   iree_allocator_free(host_allocator, devices);
@@ -544,7 +544,7 @@ static iree_status_t iree_hal_hip_driver_create_device_group_device_by_ids(
   return status;
 }
 
-static iree_status_t iree_hal_hip_driver_create_device_group_device_by_path(
+static iree_status_t iree_hal_hip_driver_create_multi_device_by_path(
     iree_hal_driver_t* base_driver, iree_string_view_t driver_name,
     iree_string_view_t device_path, iree_host_size_t param_count,
     const iree_string_pair_t* params, iree_allocator_t host_allocator,
@@ -552,7 +552,7 @@ static iree_status_t iree_hal_hip_driver_create_device_group_device_by_path(
   IREE_ASSERT_ARGUMENT(base_driver);
   IREE_ASSERT_ARGUMENT(out_device);
 
-  uint64_t device_group_count = 0;
+  uint64_t multi_count = 0;
   for (iree_host_size_t offs = 0; offs < device_path.size;) {
     iree_host_size_t comma_pos =
         iree_string_view_find_char(device_path, ',', offs);
@@ -560,13 +560,12 @@ static iree_status_t iree_hal_hip_driver_create_device_group_device_by_path(
       comma_pos = device_path.size;
     }
     offs = comma_pos + 1;
-    device_group_count++;
+    multi_count++;
   }
 
   iree_hal_device_id_t* device_ids;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, sizeof(*device_ids) * device_group_count,
-      (void**)&device_ids));
+      host_allocator, sizeof(*device_ids) * multi_count, (void**)&device_ids));
 
   iree_host_size_t idx = 0;
   for (iree_host_size_t offs = 0; offs < device_path.size;) {
@@ -583,7 +582,7 @@ static iree_status_t iree_hal_hip_driver_create_device_group_device_by_path(
     idx++;
   }
 
-  iree_status_t status = iree_hal_hip_driver_create_device_group_device_by_ids(
+  iree_status_t status = iree_hal_hip_driver_create_multi_device_by_ids(
       base_driver, device_ids, idx, param_count, params, host_allocator,
       out_device);
   iree_allocator_free(host_allocator, device_ids);
@@ -606,7 +605,7 @@ static iree_status_t iree_hal_hip_driver_create_device_by_path(
 
   if (iree_string_view_find_char(device_path, ',', 0) !=
       IREE_STRING_VIEW_NPOS) {
-    return iree_hal_hip_driver_create_device_group_device_by_path(
+    return iree_hal_hip_driver_create_multi_device_by_path(
         base_driver, driver_name, device_path, param_count, params,
         host_allocator, out_device);
   }

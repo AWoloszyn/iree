@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_HAL_DRIVERS_HIP_DEVICE_GROUP_DEVICE_H_
-#define IREE_HAL_DRIVERS_HIP_DEVICE_GROUP_DEVICE_H_
+#ifndef IREE_HAL_DRIVERS_HIP_DEVICE_H_
+#define IREE_HAL_DRIVERS_HIP_DEVICE_H_
 
 #include <stdint.h>
 
@@ -21,7 +21,7 @@ extern "C" {
 
 // Creates a device group from a set of hip devices that manage their own
 // hipCtxs.
-iree_status_t iree_hal_hip_device_group_device_create(
+iree_status_t iree_hal_hip_device_create(
     iree_hal_driver_t* driver, iree_string_view_t identifier,
     const iree_hal_hip_device_params_t* params,
     const iree_hal_hip_dynamic_symbols_t* symbols,
@@ -37,7 +37,7 @@ iree_status_t iree_hal_hip_device_group_device_create(
 // themselves or maintain their own dynamic linking support: the IREE runtime
 // only provides the symbols required by the HAL driver and not the entirety of
 // the API.
-const iree_hal_hip_dynamic_symbols_t* iree_hal_hip_device_group_dynamic_symbols(
+const iree_hal_hip_dynamic_symbols_t* iree_hal_hip_device_dynamic_symbols(
     iree_hal_device_t* device);
 
 // Hide the cast in a function as HIP deliberately added a type name for it.
@@ -57,4 +57,4 @@ static inline hipDeviceptr_t iree_hal_hip_device_size_to_hip_device_prt(
 }  // extern "C"
 #endif  // __cplusplus
 
-#endif  // IREE_HAL_DRIVERS_HIP_DEVICE_GROUP_DEVICE_H_
+#endif  // IREE_HAL_DRIVERS_HIP_DEVICE_H_

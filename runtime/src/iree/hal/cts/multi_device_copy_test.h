@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_HAL_CTS_DEVICE_GROUP_COPY_TEST_H_
-#define IREE_HAL_CTS_DEVICE_GROUP_COPY_TEST_H_
+#ifndef IREE_HAL_CTS_MULTI_DEVICE_COPY_TEST_H_
+#define IREE_HAL_CTS_MULTI_DEVICE_COPY_TEST_H_
 
 #include <cstdint>
 #include <vector>
@@ -718,4 +718,4 @@ TEST_F(DeviceGroupCopyTest, SimultaneousCopyWithTwoDevices) {
 
 }  // namespace iree::hal::cts
 
-#endif  // IREE_HAL_CTS_DEVICE_GROUP_COPY_TEST_H_
+#endif  // IREE_HAL_CTS_MULTI_DEVICE_COPY_TEST_H_
