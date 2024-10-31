@@ -1537,7 +1537,7 @@ static iree_status_t iree_hal_hip_device_group_device_wait_semaphores(
   iree_hal_hip_device_group_device_t* device =
       iree_hal_hip_device_group_device_cast(base_device);
   return iree_hal_hip_semaphore_multi_wait(semaphore_list, wait_mode, timeout,
-                                           &device->block_pool);
+                                           device->host_allocator);
 }
 
 static iree_status_t iree_hal_hip_device_group_device_profiling_begin(

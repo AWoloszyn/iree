@@ -41,7 +41,7 @@ iree_status_t iree_hal_hip_event_semaphore_create(
 iree_status_t iree_hal_hip_semaphore_multi_wait(
     const iree_hal_semaphore_list_t semaphore_list,
     iree_hal_wait_mode_t wait_mode, iree_timeout_t timeout,
-    iree_arena_block_pool_t* block_pool);
+    iree_allocator_t host_allocator);
 
 // Adds a work item to be executed once we have a forward progress
 // guarantee on this semaphore to reach a paritcular value.

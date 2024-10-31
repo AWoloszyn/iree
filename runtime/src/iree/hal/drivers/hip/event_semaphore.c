@@ -16,8 +16,22 @@
 
 typedef struct iree_hal_hip_cpu_event_t {
   iree_hal_resource_t resource;
+  iree_allocator_t host_allocator;
   iree_event_t event;
 } iree_hal_hip_cpu_event_t;
+
+static void iree_hal_hip_cpu_event_destroy(iree_hal_resource_t* resource) {
+  iree_hal_hip_cpu_event_t* event = (iree_hal_hip_cpu_event_t*)(resource);
+  iree_event_deinitialize(&event->event);
+  iree_allocator_free(event->host_allocator, event);
+}
+
+static const iree_hal_resource_vtable_t iree_hal_hip_cpu_event_vtable = {
+    .destroy = &iree_hal_hip_cpu_event_destroy};
+
+typedef struct iree_hal_hip_cpu_event_vtable_t {
+  void(IREE_API_PTR* destroy)(iree_hal_resource_t* resource);
+} iree_hal_hip_cpu_event_vtable_t;
 
 typedef struct iree_hal_hip_semaphore_work_item_t {
   iree_hal_hip_event_semaphore_scheduled_callback_t scheduled_callback;
@@ -286,22 +300,6 @@ static iree_status_t iree_hal_hip_semaphore_query_locked(
 
   if (semaphore->current_visible_value < *out_value) {
     semaphore->current_visible_value = *out_value;
-    node = iree_tree_first(&semaphore->event_queue);
-    while (node) {
-      if (iree_tree_node_get_key(node) <= *out_value) {
-        iree_hal_hip_event_t* event =
-            ((iree_hal_hip_semaphore_queue_item_t*)iree_tree_node_get_data(
-                 node))
-                ->event;
-        if (event) {
-          iree_hal_hip_event_release(event);
-        }
-        iree_tree_erase(&semaphore->event_queue, node);
-        node = iree_tree_first(&semaphore->event_queue);
-        continue;
-      }
-      break;
-    }
     iree_notification_post(&semaphore->state_notification, IREE_ALL_WAITERS);
   }
 
@@ -312,6 +310,18 @@ static iree_status_t iree_hal_hip_semaphore_query_locked(
 
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+static bool iree_hal_hip_semaphore_is_aborted(
+    iree_hal_semaphore_t* base_semaphore) {
+  iree_hal_hip_semaphore_t* semaphore =
+      iree_hal_hip_semaphore_cast(base_semaphore);
+
+  iree_slim_mutex_lock(&semaphore->mutex);
+  bool aborted =
+      semaphore->current_visible_value >= IREE_HAL_SEMAPHORE_FAILURE_VALUE;
+  iree_slim_mutex_unlock(&semaphore->mutex);
+  return aborted;
 }
 
 static iree_status_t iree_hal_hip_semaphore_query(
@@ -415,9 +425,15 @@ static iree_status_t iree_hal_hip_semaphore_wait(
   }
 
   while (semaphore->max_value_to_be_signaled < value) {
+    if (iree_time_now() > deadline_ns) {
+      iree_slim_mutex_unlock(&semaphore->mutex);
+      return iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED);
+    }
     iree_wait_token_t wait =
         iree_notification_prepare_wait(&semaphore->state_notification);
     iree_slim_mutex_unlock(&semaphore->mutex);
+
+    iree_hal_hip_event_semaphore_advance(base_semaphore);
 
     // We have to wait for the semaphore to catch up.
     if (!iree_notification_commit_wait(&semaphore->state_notification, wait,
@@ -441,6 +457,7 @@ static iree_status_t iree_hal_hip_semaphore_wait(
   if (semaphore->current_visible_value >= value) {
     iree_slim_mutex_unlock(&semaphore->mutex);
     IREE_TRACE_ZONE_END(z0);
+    iree_hal_hip_event_semaphore_advance(base_semaphore);
     return iree_ok_status();
   }
 
@@ -469,6 +486,7 @@ static iree_status_t iree_hal_hip_semaphore_wait(
   // while we sleep on the event.
   iree_hal_hip_event_retain(event);
   iree_slim_mutex_unlock(&semaphore->mutex);
+  iree_hal_hip_event_semaphore_advance(base_semaphore);
   status = IREE_HIP_RESULT_TO_STATUS(
       semaphore->symbols,
       hipEventSynchronize(iree_hal_hip_event_handle(event)));
@@ -482,18 +500,70 @@ static iree_status_t iree_hal_hip_semaphore_wait(
   return status;
 }
 
+iree_status_t iree_hal_hip_semaphore_get_cpu_event(
+    iree_hal_semaphore_t* base_semaphore, uint64_t value,
+    iree_hal_hip_cpu_event_t** out_event) {
+  iree_hal_hip_semaphore_t* semaphore =
+      iree_hal_hip_semaphore_cast(base_semaphore);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_slim_mutex_lock(&semaphore->mutex);
+  if (value <= semaphore->current_visible_value) {
+    iree_slim_mutex_unlock(&semaphore->mutex);
+    return iree_ok_status();
+  }
+  iree_tree_node_t* node = iree_tree_get(&semaphore->event_queue, value);
+  if (!node) {
+    iree_status_t status =
+        iree_tree_insert(&semaphore->event_queue, value, &node);
+    if (!iree_status_is_ok(status)) {
+      iree_slim_mutex_unlock(&semaphore->mutex);
+      IREE_TRACE_ZONE_END(z0);
+      return status;
+    }
+  }
+  iree_hal_hip_semaphore_queue_item_t* item =
+      (iree_hal_hip_semaphore_queue_item_t*)iree_tree_node_get_data(node);
+  if (!item->cpu_event) {
+    iree_status_t status = iree_allocator_malloc(semaphore->host_allocator,
+                                                 sizeof(*item->cpu_event),
+                                                 (void**)&item->cpu_event);
+    if (!iree_status_is_ok(status)) {
+      iree_slim_mutex_unlock(&semaphore->mutex);
+      IREE_TRACE_ZONE_END(z0);
+      return status;
+    }
+
+    iree_hal_resource_initialize(&iree_hal_hip_cpu_event_vtable,
+                                 (iree_hal_resource_t*)item->cpu_event);
+    item->cpu_event->host_allocator = semaphore->host_allocator;
+
+    status = iree_event_initialize(false, &item->cpu_event->event);
+    if (!iree_status_is_ok(status)) {
+      iree_allocator_free(semaphore->host_allocator, item->cpu_event);
+      iree_slim_mutex_unlock(&semaphore->mutex);
+      IREE_TRACE_ZONE_END(z0);
+      return status;
+    }
+  }
+  iree_hal_resource_retain(&item->cpu_event->resource);
+  *out_event = item->cpu_event;
+  iree_slim_mutex_unlock(&semaphore->mutex);
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_hip_semaphore_multi_wait(
     const iree_hal_semaphore_list_t semaphore_list,
     iree_hal_wait_mode_t wait_mode, iree_timeout_t timeout,
-    iree_arena_block_pool_t* block_pool) {
+    iree_allocator_t host_allocator) {
   if (semaphore_list.count == 0) return iree_ok_status();
   IREE_TRACE_ZONE_BEGIN(z0);
 
   const iree_time_t deadline_ns = iree_timeout_as_deadline_ns(timeout);
   iree_status_t status = iree_ok_status();
 
-  // TODO in a follow-up fix IREE_HAL_WAIT_MODE_ANY, and turn this into
-  // just a fast-path. We have the events ready already.
+  // If we have to wait on "all" semaphores then we can
+  // fast-path this to just a normal wait.
   if (semaphore_list.count == 1 || wait_mode == IREE_HAL_WAIT_MODE_ALL) {
     // Fast-path if we don't have to wait on only a subset of the semaphores.
     for (iree_host_size_t i = 0; i < semaphore_list.count; ++i) {
@@ -509,32 +579,58 @@ iree_status_t iree_hal_hip_semaphore_multi_wait(
     return status;
   }
 
-  // TODO(awoloszyn): This is very temp. Just to make the CTS pass until I
-  // fix this properly.
-  while (true) {
-    for (iree_host_size_t i = 0; i < semaphore_list.count; ++i) {
-      if (iree_time_now() > deadline_ns) {
-        IREE_TRACE_ZONE_END(z0);
-        return iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED);
-      }
-      uint64_t value;
-      iree_hal_hip_semaphore_t* semaphore =
-          (iree_hal_hip_semaphore_t*)semaphore_list.semaphores[i];
-      iree_slim_mutex_lock(&semaphore->mutex);
-      // Lock and use query_locked here because we need the ABORTED error code,
-      // and query translates the error code to the failure error code.
-      status = iree_status_join(
-          status, iree_hal_hip_semaphore_query_locked(semaphore, &value));
-      iree_slim_mutex_unlock(&semaphore->mutex);
-      if (!iree_status_is_ok(status)) {
-        IREE_TRACE_ZONE_END(z0);
-        return status;
-      }
-      if (value >= semaphore_list.payload_values[i]) {
-        IREE_TRACE_ZONE_END(z0);
-        return status;
+  iree_hal_hip_cpu_event_t** cpu_events =
+      (iree_hal_hip_cpu_event_t**)iree_alloca(
+          semaphore_list.count * sizeof(iree_hal_hip_cpu_event_t*));
+  memset(cpu_events, 0x00,
+         sizeof(iree_hal_hip_cpu_event_t*) * semaphore_list.count);
+  bool semaphore_hit = false;
+  for (iree_host_size_t i = 0;
+       i < semaphore_list.count && iree_status_is_ok(status); ++i) {
+    status = iree_hal_hip_semaphore_get_cpu_event(
+        semaphore_list.semaphores[i], semaphore_list.payload_values[i],
+        &cpu_events[i]);
+    if (!iree_status_is_ok(status)) {
+      break;
+    }
+    // If we can not get a CPU event for a given value BUT it returns success
+    // it is because the event has already been signaled to that value.
+    if (!cpu_events[i]) {
+      semaphore_hit = true;
+      break;
+    }
+  }
+
+  iree_wait_set_t* wait_set;
+  if (iree_status_is_ok(status) && !semaphore_hit) {
+    status =
+        iree_wait_set_allocate(semaphore_list.count, host_allocator, &wait_set);
+  }
+
+  if (iree_status_is_ok(status) && !semaphore_hit) {
+    for (iree_host_size_t i = 0;
+         i < semaphore_list.count && iree_status_is_ok(status); ++i) {
+      status = iree_wait_set_insert(wait_set, cpu_events[i]->event);
+    }
+  }
+
+  if (iree_status_is_ok(status) && !semaphore_hit) {
+    status = iree_wait_any(wait_set, deadline_ns, NULL);
+    iree_wait_set_free(wait_set);
+    if (iree_status_is_ok(status)) {
+      // Now we have to walk all of the semaphores to propagate
+      // any errors that we find.
+      for (iree_host_size_t i = 0; i < semaphore_list.count; ++i) {
+        if (iree_hal_hip_semaphore_is_aborted(semaphore_list.semaphores[i])) {
+          status = iree_make_status(IREE_STATUS_ABORTED, "Aborted");
+          break;
+        }
       }
     }
+  }
+
+  for (iree_host_size_t i = 0; i < semaphore_list.count; ++i) {
+    iree_hal_resource_release(&cpu_events[i]->resource);
   }
 
   return status;
