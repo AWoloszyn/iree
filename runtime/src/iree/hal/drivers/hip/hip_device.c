@@ -236,6 +236,8 @@ static iree_status_t iree_hal_hip_device_initialize_internal(
     const iree_hal_hip_dynamic_symbols_t* symbols,
     const iree_hal_hip_nccl_dynamic_symbols_t* nccl_symbols,
     iree_allocator_t host_allocator) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
   const iree_host_size_t identifier_offset =
       sizeof(*device) + sizeof(iree_hal_hip_per_device_information_t) *
                             device->num_physical_devices;
@@ -258,6 +260,7 @@ static iree_status_t iree_hal_hip_device_initialize_internal(
     if (device->params.stream_tracing >=
             IREE_HAL_STREAM_TRACING_VERBOSITY_MAX ||
         device->params.stream_tracing < IREE_HAL_STREAM_TRACING_VERBOSITY_OFF) {
+      IREE_TRACE_ZONE_END(z0);
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "invalid stream_tracing argument: expected to be between %d and %d",
@@ -273,6 +276,7 @@ static iree_status_t iree_hal_hip_device_initialize_internal(
 
       if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
         iree_hal_device_release((iree_hal_device_t*)device);
+        IREE_TRACE_ZONE_END(z0);
         return status;
       }
 
@@ -286,6 +290,7 @@ static iree_status_t iree_hal_hip_device_initialize_internal(
           symbols, hipCtxPushCurrent(device->device_contexts[i].hip_context));
       if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
         iree_hal_device_release((iree_hal_device_t*)device);
+        IREE_TRACE_ZONE_END(z0);
         return status;
       }
       status = iree_hal_stream_tracing_context_allocate(
@@ -296,6 +301,7 @@ static iree_status_t iree_hal_hip_device_initialize_internal(
       status = IREE_HIP_RESULT_TO_STATUS(symbols, hipCtxPopCurrent(NULL));
       if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
         iree_hal_device_release((iree_hal_device_t*)device);
+        IREE_TRACE_ZONE_END(z0);
         return status;
       }
     }
@@ -338,7 +344,7 @@ static iree_status_t iree_hal_hip_device_initialize_internal(
   if (!iree_status_is_ok(status)) {
     iree_hal_device_release((iree_hal_device_t*)device);
   }
-
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
@@ -586,8 +592,10 @@ static iree_status_t iree_hal_hip_device_query_i64(
 static iree_status_t iree_hal_hip_device_create_channel(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     iree_hal_channel_params_t params, iree_hal_channel_t** out_channel) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   iree_hal_hip_device_t* device = iree_hal_hip_device_cast(base_device);
   if (!device->nccl_symbols || !device->nccl_symbols->dylib) {
+    IREE_TRACE_ZONE_END(z0);
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,
         "RCCL runtime library version %d.%d and greater not available; "
@@ -602,6 +610,7 @@ static iree_status_t iree_hal_hip_device_create_channel(
   int requested_count = iree_math_count_ones_u64(queue_affinity);
   // TODO(#12206): properly assign affinity in the compiler.
   if (requested_count != 64 && requested_count != 1) {
+    IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "exactly one participant is allowed in a "
                             "channel but %d were specified",
@@ -613,7 +622,8 @@ static iree_status_t iree_hal_hip_device_create_channel(
   if (device->channel_provider &&
       (params.rank == IREE_HAL_CHANNEL_RANK_DEFAULT ||
        params.count == IREE_HAL_CHANNEL_COUNT_DEFAULT)) {
-    IREE_RETURN_IF_ERROR(
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
         iree_hal_channel_provider_query_default_rank_and_count(
             device->channel_provider, &params.rank, &params.count),
         "querying default collective group rank and count");
@@ -626,6 +636,7 @@ static iree_status_t iree_hal_hip_device_create_channel(
   if (iree_const_byte_span_is_empty(params.id)) {
     // User wants the default ID.
     if (!device->channel_provider) {
+      IREE_TRACE_ZONE_END(z0);
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "default collective channel ID requested but no channel provider has "
@@ -633,16 +644,19 @@ static iree_status_t iree_hal_hip_device_create_channel(
     }
     if (params.rank == 0) {
       // Bootstrap NCCL to get the root ID.
-      IREE_RETURN_IF_ERROR(
-          iree_hal_hip_nccl_get_unique_id(device->nccl_symbols, &id),
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_hal_hip_nccl_get_unique_id(device->nccl_symbols, &id),
           "bootstrapping NCCL root");
     }
     // Exchange NCCL ID with all participants.
-    IREE_RETURN_IF_ERROR(iree_hal_channel_provider_exchange_default_id(
-                             device->channel_provider,
-                             iree_make_byte_span((void*)&id, sizeof(id))),
-                         "exchanging NCCL ID with other participants");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_hal_channel_provider_exchange_default_id(
+            device->channel_provider,
+            iree_make_byte_span((void*)&id, sizeof(id))),
+        "exchanging NCCL ID with other participants");
   } else if (params.id.data_length != IREE_ARRAYSIZE(id.data)) {
+    IREE_TRACE_ZONE_END(z0);
     // User provided something but it's not what we expect.
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "NCCL ID must be %zu bytes matching the "
@@ -654,11 +668,13 @@ static iree_status_t iree_hal_hip_device_create_channel(
   }
 
   if (iree_hal_hip_nccl_id_is_empty(&id)) {
+    IREE_TRACE_ZONE_END(z0);
     // TODO: maybe this is ok? a localhost alias or something?
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "no default NCCL ID specified (all zeros)");
   }
 
+  IREE_TRACE_ZONE_END(z0);
   // TODO: when we support multiple logical devices we'll want to pass in the
   // context of the device mapped to the queue_affinity. For now since this
   // implementation only supports one device we pass in the only one we have.
@@ -673,6 +689,8 @@ static iree_status_t iree_hal_hip_device_create_command_buffer_internal(
     iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
     iree_hip_device_commandbuffer_type_e type,
     iree_hal_command_buffer_t** out_command_buffer) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
   iree_hal_hip_device_t* device = iree_hal_hip_device_cast(base_device);
 
   iree_hal_command_buffer_t* buffers[IREE_HAL_MAX_QUEUES];
@@ -734,14 +752,18 @@ static iree_status_t iree_hal_hip_device_create_command_buffer_internal(
         iree_hal_resource_release(buffers[i]);
       }
     }
+    IREE_TRACE_ZONE_END(z0);
+
     return status;
   }
 
-  return iree_hal_hip_multi_device_command_buffer_create(
+  status = iree_hal_hip_multi_device_command_buffer_create(
       device->host_allocator, cb_num, &buffers[0], device->device_allocator,
       mode, command_categories, queue_affinity, device->hip_symbols,
       device->num_physical_devices, device->device_contexts, binding_capacity,
       out_command_buffer);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 iree_status_t iree_hal_hip_device_create_stream_command_buffer(
@@ -862,13 +884,16 @@ static iree_status_t iree_hal_hip_device_queue_alloca(
     iree_hal_allocator_pool_t pool, iree_hal_buffer_params_t params,
     iree_device_size_t allocation_size,
     iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
   iree_hal_hip_device_t* device = iree_hal_hip_device_cast(base_device);
 
   // NOTE: block on the semaphores here; we could avoid this by properly
   // sequencing device work with semaphores. The HIP HAL is not currently
   // asynchronous.
-  IREE_RETURN_IF_ERROR(iree_hal_semaphore_list_wait(wait_semaphore_list,
-                                                    iree_infinite_timeout()));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_semaphore_list_wait(wait_semaphore_list,
+                                       iree_infinite_timeout()));
 
   // Allocate from the pool; likely to fail in cases of virtual memory
   // exhaustion but the error may be deferred until a later synchronization.
@@ -881,6 +906,7 @@ static iree_status_t iree_hal_hip_device_queue_alloca(
     if (queue_affinity) {
       device_num = iree_math_count_trailing_zeros_u64(queue_affinity);
       if (device_num > device->num_physical_devices) {
+        IREE_TRACE_ZONE_END(z0);
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "Device affinity out of range, maximum device is %d",
@@ -903,6 +929,7 @@ static iree_status_t iree_hal_hip_device_queue_alloca(
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_list_signal(signal_semaphore_list);
   }
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
@@ -915,13 +942,16 @@ static iree_status_t iree_hal_hip_device_queue_dealloca(
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* buffer) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
   iree_hal_hip_device_t* device = iree_hal_hip_device_cast(base_device);
 
   // NOTE: block on the semaphores here; we could avoid this by properly
   // sequencing device work with semaphores. The HIP HAL is not currently
   // asynchronous.
-  IREE_RETURN_IF_ERROR(iree_hal_semaphore_list_wait(wait_semaphore_list,
-                                                    iree_infinite_timeout()));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_semaphore_list_wait(wait_semaphore_list,
+                                       iree_infinite_timeout()));
 
   // Schedule the buffer deallocation if we got it from a pool and otherwise
   // drop it on the floor and let it be freed when the buffer is released.
@@ -931,6 +961,7 @@ static iree_status_t iree_hal_hip_device_queue_dealloca(
     if (queue_affinity) {
       device_num = iree_math_count_trailing_zeros_u64(queue_affinity);
       if (device_num > device->num_physical_devices) {
+        IREE_TRACE_ZONE_END(z0);
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "Device affinity out of range, maximum device is %d",
@@ -949,6 +980,7 @@ static iree_status_t iree_hal_hip_device_queue_dealloca(
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_list_signal(signal_semaphore_list);
   }
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
@@ -959,6 +991,8 @@ static iree_status_t iree_hal_hip_device_queue_read(
     iree_hal_file_t* source_file, uint64_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, uint32_t flags) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
   // TODO: expose streaming chunk count/size options.
   iree_status_t loop_status = iree_ok_status();
   iree_hal_file_transfer_options_t options = {
@@ -966,10 +1000,13 @@ static iree_status_t iree_hal_hip_device_queue_read(
       .chunk_count = IREE_HAL_FILE_TRANSFER_CHUNK_COUNT_DEFAULT,
       .chunk_size = IREE_HAL_FILE_TRANSFER_CHUNK_SIZE_DEFAULT,
   };
-  IREE_RETURN_IF_ERROR(iree_hal_device_queue_read_streaming(
-      base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source_file, source_offset, target_buffer, target_offset, length, flags,
-      options));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_device_queue_read_streaming(
+              base_device, queue_affinity, wait_semaphore_list,
+              signal_semaphore_list, source_file, source_offset, target_buffer,
+              target_offset, length, flags, options));
+  IREE_TRACE_ZONE_END(z0);
+
   return loop_status;
 }
 
@@ -980,6 +1017,8 @@ static iree_status_t iree_hal_hip_device_queue_write(
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, uint32_t flags) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
   // TODO: expose streaming chunk count/size options.
   iree_status_t loop_status = iree_ok_status();
   iree_hal_file_transfer_options_t options = {
@@ -987,10 +1026,12 @@ static iree_status_t iree_hal_hip_device_queue_write(
       .chunk_count = IREE_HAL_FILE_TRANSFER_CHUNK_COUNT_DEFAULT,
       .chunk_size = IREE_HAL_FILE_TRANSFER_CHUNK_SIZE_DEFAULT,
   };
-  IREE_RETURN_IF_ERROR(iree_hal_device_queue_write_streaming(
-      base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source_buffer, source_offset, target_file, target_offset, length, flags,
-      options));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_device_queue_write_streaming(
+              base_device, queue_affinity, wait_semaphore_list,
+              signal_semaphore_list, source_buffer, source_offset, target_file,
+              target_offset, length, flags, options));
+  IREE_TRACE_ZONE_END(z0);
   return loop_status;
 }
 
