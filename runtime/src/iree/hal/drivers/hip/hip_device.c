@@ -436,6 +436,7 @@ iree_status_t iree_hal_hip_device_create(
 
   if (iree_status_is_ok(status)) {
     device->host_event_pool = host_event_pool;
+    *out_device = (iree_hal_device_t*)device;
   } else {
     // Release resources we have accquired after HAL device creation.
     for (uint32_t i = 0; i < device_count; ++i) {
@@ -448,7 +449,7 @@ iree_status_t iree_hal_hip_device_create(
     iree_hal_device_release((iree_hal_device_t*)device);
     device = NULL;
   }
-  *out_device = (iree_hal_device_t*)device;
+
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
