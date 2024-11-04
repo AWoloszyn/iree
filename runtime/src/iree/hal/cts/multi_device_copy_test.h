@@ -22,6 +22,9 @@ using ::testing::ContainerEq;
 
 namespace {
 constexpr iree_device_size_t kDefaultAllocationSize = 1024;
+constexpr iree_hal_queue_affinity_t kQueue0 = 0x1;
+constexpr iree_hal_queue_affinity_t kQueue1 = 0x2;
+
 }  // namespace
 
 class DeviceGroupCopyTest : public CTSTestBase<> {};
@@ -30,13 +33,13 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromQueue0) {
   iree_hal_command_buffer_t* command_buffer1 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0x1,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, kQueue0,
       /*binding_capacity=*/0, &command_buffer1));
 
   iree_hal_command_buffer_t* command_buffer2 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0x1,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, kQueue0,
       /*binding_capacity=*/0, &command_buffer2));
   uint8_t i8_val = 0x54;
   std::vector<uint8_t> reference_buffer(kDefaultAllocationSize);
@@ -49,7 +52,7 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromQueue0) {
   host_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
                       IREE_HAL_BUFFER_USAGE_TRANSFER |
                       IREE_HAL_BUFFER_USAGE_MAPPING;
-  host_params.queue_affinity = 0x1;
+  host_params.queue_affinity = kQueue0;
   iree_hal_buffer_t* host_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, host_params, kDefaultAllocationSize, &host_buffer));
@@ -64,14 +67,14 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromQueue0) {
   device_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
                         IREE_HAL_BUFFER_USAGE_TRANSFER |
                         IREE_HAL_BUFFER_USAGE_MAPPING;
-  device_params.queue_affinity = 0x1 | 0x2;
+  device_params.queue_affinity = kQueue0 | kQueue1;
 
   iree_hal_buffer_t* device_buffer_device_1 = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, device_params, kDefaultAllocationSize,
       &device_buffer_device_1));
 
-  device_params.queue_affinity = 0x2;
+  device_params.queue_affinity = kQueue1;
   iree_hal_buffer_t* device_buffer_device_2 = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, device_params, kDefaultAllocationSize,
@@ -123,13 +126,13 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromQueue1) {
   iree_hal_command_buffer_t* command_buffer1 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0x2,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, kQueue1,
       /*binding_capacity=*/0, &command_buffer1));
 
   iree_hal_command_buffer_t* command_buffer2 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0x2,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, kQueue1,
       /*binding_capacity=*/0, &command_buffer2));
   uint8_t i8_val = 0x54;
   std::vector<uint8_t> reference_buffer(kDefaultAllocationSize);
@@ -142,7 +145,7 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromQueue1) {
   host_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
                       IREE_HAL_BUFFER_USAGE_TRANSFER |
                       IREE_HAL_BUFFER_USAGE_MAPPING;
-  host_params.queue_affinity = 0x2;
+  host_params.queue_affinity = kQueue1;
   iree_hal_buffer_t* host_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, host_params, kDefaultAllocationSize, &host_buffer));
@@ -157,14 +160,14 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromQueue1) {
   device_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
                         IREE_HAL_BUFFER_USAGE_TRANSFER |
                         IREE_HAL_BUFFER_USAGE_MAPPING;
-  device_params.queue_affinity = 0x2;
+  device_params.queue_affinity = kQueue1;
 
   iree_hal_buffer_t* device_buffer_device_1 = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, device_params, kDefaultAllocationSize,
       &device_buffer_device_1));
 
-  device_params.queue_affinity = 0x2;
+  device_params.queue_affinity = kQueue1;
   iree_hal_buffer_t* device_buffer_device_2 = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, device_params, kDefaultAllocationSize,
@@ -181,9 +184,9 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromQueue1) {
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer1));
 
   IREE_ASSERT_OK(SubmitCommandBufferAndWait(
-      command_buffer1, iree_hal_buffer_binding_table_empty(), 0x2));
+      command_buffer1, iree_hal_buffer_binding_table_empty(), kQueue1));
 
-  // Copy the buffer between devices
+  // Copy the buffer between devices.
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer2));
   IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
       command_buffer2, /*source_ref=*/
@@ -195,7 +198,7 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromQueue1) {
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer2));
 
   IREE_ASSERT_OK(SubmitCommandBufferAndWait(
-      command_buffer2, iree_hal_buffer_binding_table_empty(), 0x2));
+      command_buffer2, iree_hal_buffer_binding_table_empty(), kQueue1));
 
   // Read the device buffer and compare.
   std::vector<uint8_t> actual_data(kDefaultAllocationSize);
@@ -218,13 +221,13 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromBothQueues) {
   iree_hal_command_buffer_t* command_buffer1 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0x1,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, kQueue0,
       /*binding_capacity=*/0, &command_buffer1));
 
   iree_hal_command_buffer_t* command_buffer2 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0x2,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, kQueue1,
       /*binding_capacity=*/0, &command_buffer2));
   uint8_t i8_val = 0x54;
   std::vector<uint8_t> reference_buffer(kDefaultAllocationSize);
@@ -237,7 +240,7 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromBothQueues) {
   host_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
                       IREE_HAL_BUFFER_USAGE_TRANSFER |
                       IREE_HAL_BUFFER_USAGE_MAPPING;
-  host_params.queue_affinity = 0x1;
+  host_params.queue_affinity = kQueue0;
   iree_hal_buffer_t* host_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, host_params, kDefaultAllocationSize, &host_buffer));
@@ -252,14 +255,14 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromBothQueues) {
   device_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
                         IREE_HAL_BUFFER_USAGE_TRANSFER |
                         IREE_HAL_BUFFER_USAGE_MAPPING;
-  device_params.queue_affinity = 0x1 | 0x2;
+  device_params.queue_affinity = kQueue0 | kQueue1;
 
   iree_hal_buffer_t* device_buffer_device_1 = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, device_params, kDefaultAllocationSize,
       &device_buffer_device_1));
 
-  device_params.queue_affinity = 0x2;
+  device_params.queue_affinity = kQueue1;
   iree_hal_buffer_t* device_buffer_device_2 = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, device_params, kDefaultAllocationSize,
@@ -276,7 +279,7 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromBothQueues) {
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer1));
 
   IREE_ASSERT_OK(SubmitCommandBufferAndWait(
-      command_buffer1, iree_hal_buffer_binding_table_empty(), 0x1));
+      command_buffer1, iree_hal_buffer_binding_table_empty(), kQueue0));
 
   // Copy the buffer between devices
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer2));
@@ -290,7 +293,7 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromBothQueues) {
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer2));
 
   IREE_ASSERT_OK(SubmitCommandBufferAndWait(
-      command_buffer2, iree_hal_buffer_binding_table_empty(), 0x2));
+      command_buffer2, iree_hal_buffer_binding_table_empty(), kQueue1));
 
   // Read the device buffer and compare.
   std::vector<uint8_t> actual_data(kDefaultAllocationSize);
@@ -313,13 +316,13 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromBothQueuesSynchronized) {
   iree_hal_command_buffer_t* command_buffer1 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0x1,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, kQueue0,
       /*binding_capacity=*/0, &command_buffer1));
 
   iree_hal_command_buffer_t* command_buffer2 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0x2,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, kQueue1,
       /*binding_capacity=*/0, &command_buffer2));
   uint8_t i8_val = 0x54;
   std::vector<uint8_t> reference_buffer(kDefaultAllocationSize);
@@ -332,7 +335,7 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromBothQueuesSynchronized) {
   host_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
                       IREE_HAL_BUFFER_USAGE_TRANSFER |
                       IREE_HAL_BUFFER_USAGE_MAPPING;
-  host_params.queue_affinity = 0x1;
+  host_params.queue_affinity = kQueue0;
   iree_hal_buffer_t* host_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, host_params, kDefaultAllocationSize, &host_buffer));
@@ -347,14 +350,14 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromBothQueuesSynchronized) {
   device_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
                         IREE_HAL_BUFFER_USAGE_TRANSFER |
                         IREE_HAL_BUFFER_USAGE_MAPPING;
-  device_params.queue_affinity = 0x1 | 0x2;
+  device_params.queue_affinity = kQueue0 | kQueue1;
 
   iree_hal_buffer_t* device_buffer_device_1 = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, device_params, kDefaultAllocationSize,
       &device_buffer_device_1));
 
-  device_params.queue_affinity = 0x2;
+  device_params.queue_affinity = kQueue1;
   iree_hal_buffer_t* device_buffer_device_2 = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, device_params, kDefaultAllocationSize,
@@ -407,11 +410,11 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromBothQueuesSynchronized) {
   iree_hal_buffer_binding_table_t empty_binding =
       iree_hal_buffer_binding_table_empty();
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, 0x1, iree_hal_semaphore_list_empty(), copy_semaphore_list, 1,
+      device_, kQueue0, iree_hal_semaphore_list_empty(), copy_semaphore_list, 1,
       &command_buffer1, &empty_binding));
 
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, 0x2, copy_semaphore_list, done_semaphore_list, 1,
+      device_, kQueue1, copy_semaphore_list, done_semaphore_list, 1,
       &command_buffer2, &empty_binding));
 
   IREE_ASSERT_OK(iree_hal_semaphore_wait(second_copy_done_semaphore,
@@ -442,13 +445,13 @@ TEST_F(DeviceGroupCopyTest,
   iree_hal_command_buffer_t* command_buffer1 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0x1,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, kQueue0,
       /*binding_capacity=*/0, &command_buffer1));
 
   iree_hal_command_buffer_t* command_buffer2 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0x2,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, kQueue1,
       /*binding_capacity=*/0, &command_buffer2));
   uint8_t i8_val = 0x54;
   std::vector<uint8_t> reference_buffer(kDefaultAllocationSize);
@@ -461,7 +464,7 @@ TEST_F(DeviceGroupCopyTest,
   host_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
                       IREE_HAL_BUFFER_USAGE_TRANSFER |
                       IREE_HAL_BUFFER_USAGE_MAPPING;
-  host_params.queue_affinity = 0x1;
+  host_params.queue_affinity = kQueue0;
   iree_hal_buffer_t* host_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, host_params, kDefaultAllocationSize, &host_buffer));
@@ -476,14 +479,14 @@ TEST_F(DeviceGroupCopyTest,
   device_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
                         IREE_HAL_BUFFER_USAGE_TRANSFER |
                         IREE_HAL_BUFFER_USAGE_MAPPING;
-  device_params.queue_affinity = 0x1 | 0x2;
+  device_params.queue_affinity = kQueue0 | kQueue1;
 
   iree_hal_buffer_t* device_buffer_device_1 = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, device_params, kDefaultAllocationSize,
       &device_buffer_device_1));
 
-  device_params.queue_affinity = 0x2;
+  device_params.queue_affinity = kQueue1;
   iree_hal_buffer_t* device_buffer_device_2 = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, device_params, kDefaultAllocationSize,
@@ -536,11 +539,11 @@ TEST_F(DeviceGroupCopyTest,
   iree_hal_buffer_binding_table_t empty_binding =
       iree_hal_buffer_binding_table_empty();
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, 0x1, iree_hal_semaphore_list_empty(), copy_semaphore_list, 1,
+      device_, kQueue0, iree_hal_semaphore_list_empty(), copy_semaphore_list, 1,
       &command_buffer1, &empty_binding));
 
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, 0x2, copy_semaphore_list, done_semaphore_list, 1,
+      device_, kQueue1, copy_semaphore_list, done_semaphore_list, 1,
       &command_buffer2, &empty_binding));
 
   IREE_ASSERT_OK(iree_hal_semaphore_wait(second_copy_done_semaphore,
@@ -570,13 +573,13 @@ TEST_F(DeviceGroupCopyTest, SimultaneousCopyWithTwoDevices) {
   iree_hal_command_buffer_t* command_buffer1 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0x1,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, kQueue0,
       /*binding_capacity=*/0, &command_buffer1));
 
   iree_hal_command_buffer_t* command_buffer2 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0x2,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, kQueue1,
       /*binding_capacity=*/0, &command_buffer2));
   uint8_t i8_val = 0x54;
   std::vector<uint8_t> reference_buffer(kDefaultAllocationSize);
@@ -588,7 +591,7 @@ TEST_F(DeviceGroupCopyTest, SimultaneousCopyWithTwoDevices) {
   host_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
                       IREE_HAL_BUFFER_USAGE_TRANSFER |
                       IREE_HAL_BUFFER_USAGE_MAPPING;
-  host_params.queue_affinity = 0x1;
+  host_params.queue_affinity = kQueue0;
   iree_hal_buffer_t* host_buffer1 = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, host_params, kDefaultAllocationSize, &host_buffer1));
@@ -600,7 +603,7 @@ TEST_F(DeviceGroupCopyTest, SimultaneousCopyWithTwoDevices) {
   std::vector<uint8_t> reference_buffer2(kDefaultAllocationSize);
   uint8_t i8_val2 = 0xce;
   std::memset(reference_buffer2.data(), i8_val2, kDefaultAllocationSize);
-  host_params.queue_affinity = 0x2;
+  host_params.queue_affinity = kQueue1;
   iree_hal_buffer_t* host_buffer2 = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, host_params, kDefaultAllocationSize, &host_buffer2));
@@ -616,14 +619,14 @@ TEST_F(DeviceGroupCopyTest, SimultaneousCopyWithTwoDevices) {
   device_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
                         IREE_HAL_BUFFER_USAGE_TRANSFER |
                         IREE_HAL_BUFFER_USAGE_MAPPING;
-  device_params.queue_affinity = 0x1;
+  device_params.queue_affinity = kQueue0;
 
   iree_hal_buffer_t* device_buffer_device_1 = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, device_params, kDefaultAllocationSize,
       &device_buffer_device_1));
 
-  device_params.queue_affinity = 0x2;
+  device_params.queue_affinity = kQueue1;
   iree_hal_buffer_t* device_buffer_device_2 = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, device_params, kDefaultAllocationSize,
@@ -675,12 +678,12 @@ TEST_F(DeviceGroupCopyTest, SimultaneousCopyWithTwoDevices) {
   iree_hal_buffer_binding_table_t empty_binding =
       iree_hal_buffer_binding_table_empty();
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, 0x1, iree_hal_semaphore_list_empty(), first_copy_complete, 1,
+      device_, kQueue0, iree_hal_semaphore_list_empty(), first_copy_complete, 1,
       &command_buffer1, &empty_binding));
 
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, 0x2, iree_hal_semaphore_list_empty(), second_copy_complete, 1,
-      &command_buffer2, &empty_binding));
+      device_, kQueue1, iree_hal_semaphore_list_empty(), second_copy_complete,
+      1, &command_buffer2, &empty_binding));
 
   IREE_ASSERT_OK(iree_hal_semaphore_wait(first_copy_done_semaphore,
                                          target_payload_value,
