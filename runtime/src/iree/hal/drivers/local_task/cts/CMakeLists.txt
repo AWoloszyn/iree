@@ -37,7 +37,7 @@ if(IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF)
     DEPS
       iree::hal::drivers::local_task::registration
     EXCLUDED_TESTS
-    ${IREE_MULTI_DEVICE_CTS_TESTS} # Device groups not supported yet
+      ${IREE_MULTI_DEVICE_CTS_TESTS} # Device groups not supported yet
     LABELS
       driver=local-task
     COMPILER_FLAGS
@@ -64,7 +64,7 @@ if(IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE)
     DEPS
       iree::hal::drivers::local_task::registration
     EXCLUDED_TESTS
-    ${IREE_MULTI_DEVICE_CTS_TESTS} # Device groups not supported yet
+      ${IREE_MULTI_DEVICE_CTS_TESTS} # Device groups not supported yet
     LABELS
       driver=local-task
   )
