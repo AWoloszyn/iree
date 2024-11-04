@@ -14,9 +14,9 @@ set(IREE_ALL_CTS_TESTS
   "command_buffer_fill_buffer"
   "command_buffer_update_buffer"
   "driver"
-  "multi_device_copy"
-  "multi_device_dispatch"
-  "multi_device_driver"
+  "multi_queue_copy"
+  "multi_queue_dispatch"
+  "multi_queue_driver"
   "event"
   "executable_cache"
   "file"
@@ -31,7 +31,7 @@ set(IREE_ALL_CTS_TESTS
 set(IREE_EXECUTABLE_CTS_TESTS
   "command_buffer_dispatch"
   "command_buffer_dispatch_constants"
-  "multi_device_dispatch"
+  "multi_queue_dispatch"
   "executable_cache"
   PARENT_SCOPE
 )
@@ -41,13 +41,6 @@ set(IREE_ALL_CTS_EXECUTABLE_SOURCES
   "command_buffer_dispatch_test"
   "command_buffer_dispatch_constants_test"
   "executable_cache_test"
-  PARENT_SCOPE
-)
-
-set (IREE_MULTI_DEVICE_CTS_TESTS
-  "multi_device_copy"
-  "multi_device_dispatch"
-  "multi_device_driver"
   PARENT_SCOPE
 )
 
@@ -170,9 +163,9 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    multi_device_copy_test_library
+    multi_queue_copy_test_library
   HDRS
-    "multi_device_copy_test.h"
+    "multi_queue_copy_test.h"
   DEPS
     ::cts_test_base
     iree::base
@@ -183,9 +176,9 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    multi_device_dispatch_test_library
+    multi_queue_dispatch_test_library
   HDRS
-    "multi_device_dispatch_test.h"
+    "multi_queue_dispatch_test.h"
   DEPS
     ::cts_test_base
     iree::base
@@ -196,9 +189,9 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    multi_device_driver_test_library
+    multi_queue_driver_test_library
   HDRS
-    "multi_device_driver_test.h"
+    "multi_queue_driver_test.h"
   DEPS
     ::cts_test_base
     iree::base

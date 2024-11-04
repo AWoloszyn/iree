@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_HAL_CTS_MULTI_DEVICE_COPY_TEST_H_
-#define IREE_HAL_CTS_MULTI_DEVICE_COPY_TEST_H_
+#ifndef IREE_HAL_CTS_MULTI_QUEUE_COPY_TEST_H_
+#define IREE_HAL_CTS_MULTI_QUEUE_COPY_TEST_H_
 
 #include <cstdint>
 #include <vector>
@@ -27,9 +27,20 @@ constexpr iree_hal_queue_affinity_t kQueue1 = 0x2;
 
 }  // namespace
 
-class DeviceGroupCopyTest : public CTSTestBase<> {};
+class MultiQueueCopyTest : public CTSTestBase<> {
+  virtual void SetUp() {
+    CTSTestBase<>::SetUp();
+    int64_t concurrency;
+    IREE_ASSERT_OK(iree_hal_device_query_i64(
+        device_, IREE_SV("hal.device"), IREE_SV("concurrency"), &concurrency));
+    if (concurrency < 2) {
+      GTEST_SKIP() << "Test requires at least two queues";
+      return;
+    }
+  }
+};
 
-TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromQueue0) {
+TEST_F(MultiQueueCopyTest, CopyBetweenDevicesFromQueue0) {
   iree_hal_command_buffer_t* command_buffer1 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
@@ -122,7 +133,7 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromQueue0) {
   iree_hal_buffer_release(host_buffer);
 }
 
-TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromQueue1) {
+TEST_F(MultiQueueCopyTest, CopyBetweenDevicesFromQueue1) {
   iree_hal_command_buffer_t* command_buffer1 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
@@ -217,7 +228,7 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromQueue1) {
   iree_hal_buffer_release(host_buffer);
 }
 
-TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromBothQueues) {
+TEST_F(MultiQueueCopyTest, CopyBetweenDevicesFromBothQueues) {
   iree_hal_command_buffer_t* command_buffer1 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
@@ -312,7 +323,7 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromBothQueues) {
   iree_hal_buffer_release(host_buffer);
 }
 
-TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromBothQueuesSynchronized) {
+TEST_F(MultiQueueCopyTest, CopyBetweenDevicesFromBothQueuesSynchronized) {
   iree_hal_command_buffer_t* command_buffer1 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
@@ -440,7 +451,7 @@ TEST_F(DeviceGroupCopyTest, CopyBetweenDevicesFromBothQueuesSynchronized) {
   iree_hal_buffer_release(host_buffer);
 }
 
-TEST_F(DeviceGroupCopyTest,
+TEST_F(MultiQueueCopyTest,
        CopyBetweenDevicesFromBothQueuesSynchronizedReverseSubmit) {
   iree_hal_command_buffer_t* command_buffer1 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
@@ -569,7 +580,7 @@ TEST_F(DeviceGroupCopyTest,
   iree_hal_buffer_release(host_buffer);
 }
 
-TEST_F(DeviceGroupCopyTest, SimultaneousCopyWithTwoDevices) {
+TEST_F(MultiQueueCopyTest, SimultaneousCopyWithTwoDevices) {
   iree_hal_command_buffer_t* command_buffer1 = NULL;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
@@ -721,4 +732,4 @@ TEST_F(DeviceGroupCopyTest, SimultaneousCopyWithTwoDevices) {
 
 }  // namespace iree::hal::cts
 
-#endif  // IREE_HAL_CTS_MULTI_DEVICE_COPY_TEST_H_
+#endif  // IREE_HAL_CTS_MULTI_QUEUE_COPY_TEST_H_

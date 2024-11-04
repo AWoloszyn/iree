@@ -35,7 +35,6 @@ iree_hal_cts_test_suite(
   EXCLUDED_TESTS
     # HAL event is unimplemented for now.
     "event"
-    ${IREE_MULTI_DEVICE_CTS_TESTS}
   LABELS
     driver=hip
     requires-gpu-amd
@@ -63,7 +62,6 @@ iree_hal_cts_test_suite(
   EXCLUDED_TESTS
     # HAL event is unimplemented for now.
     "event"
-    ${IREE_MULTI_DEVICE_CTS_TESTS}
   LABELS
     driver=hip
 )
@@ -72,15 +70,15 @@ iree_hal_cts_test_suite(
   DRIVER_NAME
     hip
   VARIANT_SUFFIX
-    multi_device_stream
+    multi_queue_stream
   DRIVER_REGISTRATION_HDR
     "runtime/src/iree/hal/drivers/hip/registration/driver_module.h"
   DRIVER_REGISTRATION_FN
     "iree_hal_hip_driver_module_register"
   DEVICE_CREATION_HDR
-    "runtime/src/iree/hal/drivers/hip/cts/multi_device_creation.h"
+    "runtime/src/iree/hal/drivers/hip/cts/multi_queue_device_creation.h"
   DEFAULT_DEVICE_CREATION_FN
-    "iree_hal_drivers_hip_cts_default_multi_device_create"
+    "iree_hal_drivers_hip_cts_default_multi_queue_create"
   COMPILER_TARGET_BACKEND
     "rocm"
   EXECUTABLE_FORMAT
@@ -103,15 +101,15 @@ iree_hal_cts_test_suite(
   DRIVER_NAME
     hip
   VARIANT_SUFFIX
-    multi_device_graph
+    multi_queue_graph
   DRIVER_REGISTRATION_HDR
     "runtime/src/iree/hal/drivers/hip/registration/driver_module.h"
   DRIVER_REGISTRATION_FN
     "iree_hal_hip_driver_module_register"
   DEVICE_CREATION_HDR
-    "runtime/src/iree/hal/drivers/hip/cts/multi_device_creation.h"
+    "runtime/src/iree/hal/drivers/hip/cts/multi_queue_device_creation.h"
   DEFAULT_DEVICE_CREATION_FN
-    "iree_hal_drivers_hip_cts_default_multi_device_create"
+    "iree_hal_drivers_hip_cts_default_multi_queue_create"
   COMPILER_TARGET_BACKEND
     "rocm"
   EXECUTABLE_FORMAT
@@ -133,15 +131,15 @@ iree_hal_cts_test_suite(
   DRIVER_NAME
     hip
   VARIANT_SUFFIX
-    multi_device_stream_queue_1
+    multi_queue_stream_queue_1
   DRIVER_REGISTRATION_HDR
     "runtime/src/iree/hal/drivers/hip/registration/driver_module.h"
   DRIVER_REGISTRATION_FN
     "iree_hal_hip_driver_module_register"
   DEVICE_CREATION_HDR
-    "runtime/src/iree/hal/drivers/hip/cts/multi_device_creation.h"
+    "runtime/src/iree/hal/drivers/hip/cts/multi_queue_device_creation.h"
   DEFAULT_DEVICE_CREATION_FN
-    "iree_hal_drivers_hip_cts_default_multi_device_create"
+    "iree_hal_drivers_hip_cts_default_multi_queue_create"
   COMPILER_TARGET_BACKEND
     "rocm"
   EXECUTABLE_FORMAT
@@ -155,7 +153,6 @@ iree_hal_cts_test_suite(
   DEPS
     iree::hal::drivers::hip::registration
   EXCLUDED_TESTS
-    ${IREE_MULTI_DEVICE_CTS_TESTS}
     # HAL event is unimplemented for now.
     "event"
   LABELS
@@ -167,15 +164,15 @@ iree_hal_cts_test_suite(
   DRIVER_NAME
     hip
   VARIANT_SUFFIX
-    multi_device_graph_queue_1
+    multi_queue_graph_queue_1
   DRIVER_REGISTRATION_HDR
     "runtime/src/iree/hal/drivers/hip/registration/driver_module.h"
   DRIVER_REGISTRATION_FN
     "iree_hal_hip_driver_module_register"
   DEVICE_CREATION_HDR
-    "runtime/src/iree/hal/drivers/hip/cts/multi_device_creation.h"
+    "runtime/src/iree/hal/drivers/hip/cts/multi_queue_device_creation.h"
   DEFAULT_DEVICE_CREATION_FN
-    "iree_hal_drivers_hip_cts_default_multi_device_create"
+    "iree_hal_drivers_hip_cts_default_multi_queue_create"
   DEFAULT_SUBMIT_QUEUE_AFFINITY
     "(1 << 1)"
   COMPILER_TARGET_BACKEND
@@ -189,7 +186,6 @@ iree_hal_cts_test_suite(
   DEPS
     iree::hal::drivers::hip::registration
   EXCLUDED_TESTS
-    ${IREE_MULTI_DEVICE_CTS_TESTS}
     # HAL event is unimplemented for now.
     "event"
   LABELS

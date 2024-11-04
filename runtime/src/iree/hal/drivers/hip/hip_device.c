@@ -20,7 +20,7 @@
 #include "iree/hal/drivers/hip/event_semaphore.h"
 #include "iree/hal/drivers/hip/graph_command_buffer.h"
 #include "iree/hal/drivers/hip/hip_allocator.h"
-#include "iree/hal/drivers/hip/hip_multi_device_command_buffer.h"
+#include "iree/hal/drivers/hip/hip_multi_queue_command_buffer.h"
 #include "iree/hal/drivers/hip/memory_pools.h"
 #include "iree/hal/drivers/hip/nop_executable_cache.h"
 #include "iree/hal/drivers/hip/per_device_information.h"
@@ -79,7 +79,7 @@ typedef struct iree_hal_hip_device_t {
 
   iree_hal_hip_cleanup_thread_t* cleanup_thread;
 
-  // The number of underlying devices in this multi_device.
+  // The number of underlying devices in this device.
   uint32_t num_physical_devices;
   iree_hal_hip_per_device_information_t device_contexts[];
 } iree_hal_hip_device_t;
@@ -588,6 +588,13 @@ static iree_status_t iree_hal_hip_device_query_i64(
     return iree_ok_status();
   }
 
+  if (iree_string_view_equal(category, IREE_SV("hal.device"))) {
+    if (iree_string_view_equal(key, IREE_SV("concurrency"))) {
+      *out_value = device->num_physical_devices;
+      return iree_ok_status();
+    }
+  }
+
   return iree_make_status(
       IREE_STATUS_NOT_FOUND,
       "unknown device configuration key value '%.*s :: %.*s'",
@@ -762,7 +769,7 @@ static iree_status_t iree_hal_hip_device_create_command_buffer_internal(
     return status;
   }
 
-  status = iree_hal_hip_multi_device_command_buffer_create(
+  status = iree_hal_hip_multi_queue_command_buffer_create(
       device->host_allocator, cb_num, &buffers[0], device->device_allocator,
       mode, command_categories, queue_affinity, device->hip_symbols,
       device->num_physical_devices, device->device_contexts, binding_capacity,
@@ -1072,9 +1079,9 @@ static iree_status_t iree_hal_hip_device_complete_submission(
   // 1) Read any tracing events that were submitted.
   for (iree_host_size_t i = 0; i < data->command_buffer_count; ++i) {
     iree_hal_command_buffer_t* command_buffer = data->command_buffers[i];
-    if (iree_hal_hip_multi_device_command_buffer_isa(command_buffer)) {
+    if (iree_hal_hip_multi_queue_command_buffer_isa(command_buffer)) {
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_hal_hip_multi_device_command_buffer_get(
+          z0, iree_hal_hip_multi_queue_command_buffer_get(
                   command_buffer, data->queue_affinity, &command_buffer));
     }
 
@@ -1144,7 +1151,7 @@ static iree_status_t iree_hal_hip_device_execute_now(
 
   IREE_TRACE_ZONE_BEGIN_NAMED(z2, "Enqueue semaphore wait");
   // TODO(awoloszyn): Because of how hip works, if we only have a single
-  // device in the multi_device we could avoid waiting on any of these
+  // physical device in the hip_device we could avoid waiting on any of these
   // semaphores, we are guaranteed to have waits, but if we want this
   // to work across multiple device/streams, we need these waits.
   for (iree_host_size_t i = 0;
@@ -1184,9 +1191,9 @@ static iree_status_t iree_hal_hip_device_execute_now(
   for (iree_host_size_t i = 0;
        i < data->command_buffer_count && iree_status_is_ok(status); ++i) {
     iree_hal_command_buffer_t* command_buffer = data->command_buffers[i];
-    if (iree_hal_hip_multi_device_command_buffer_isa(command_buffer)) {
+    if (iree_hal_hip_multi_queue_command_buffer_isa(command_buffer)) {
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_hal_hip_multi_device_command_buffer_get(
+          z0, iree_hal_hip_multi_queue_command_buffer_get(
                   command_buffer, data->queue_affinity, &command_buffer));
     }
     iree_hal_buffer_binding_table_t binding_table =

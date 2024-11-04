@@ -4,15 +4,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_HAL_DRIVERS_HIP_REGISTRATION_MULTI_DEVICE_H_
-#define IREE_HAL_DRIVERS_HIP_REGISTRATION_MULTI_DEVICE_H_
+#ifndef IREE_HAL_DRIVERS_HIP_REGISTRATION_MULTI_QUEUE_H_
+#define IREE_HAL_DRIVERS_HIP_REGISTRATION_MULTI_QUEUE_H_
 
 #include <map>
 
 #include "iree/hal/driver.h"
 #include "iree/testing/status_matchers.h"
 
-inline iree_status_t iree_hal_drivers_hip_cts_default_multi_device_create(
+inline iree_status_t iree_hal_drivers_hip_cts_default_multi_queue_create(
     iree_hal_driver_t* driver, iree_allocator_t host_allocator,
     iree_hal_device_t** out_device) {
   std::multimap<std::string, iree_host_size_t> grouped_devices;
@@ -68,4 +68,4 @@ inline iree_status_t iree_hal_drivers_hip_cts_default_multi_device_create(
       /*params=*/NULL, iree_allocator_system(), out_device);
 }
 
-#endif  // IREE_HAL_DRIVERS_HIP_REGISTRATION_MULTI_DEVICE_H_
+#endif  // IREE_HAL_DRIVERS_HIP_REGISTRATION_MULTI_QUEUE_H_

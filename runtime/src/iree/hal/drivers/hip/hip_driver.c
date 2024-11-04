@@ -504,7 +504,7 @@ static iree_status_t iree_hal_hip_driver_get_device_id_by_path(
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "unsupported device path");
 }
 
-static iree_status_t iree_hal_hip_driver_create_multi_device_by_ids(
+static iree_status_t iree_hal_hip_driver_create_multi_queue_device_by_ids(
     iree_hal_driver_t* base_driver, iree_hal_device_id_t* device_ids,
     iree_host_size_t device_count, iree_host_size_t param_count,
     const iree_string_pair_t* params, iree_allocator_t host_allocator,
@@ -544,7 +544,7 @@ static iree_status_t iree_hal_hip_driver_create_multi_device_by_ids(
   return status;
 }
 
-static iree_status_t iree_hal_hip_driver_create_multi_device_by_path(
+static iree_status_t iree_hal_hip_driver_create_multi_queue_device_by_path(
     iree_hal_driver_t* base_driver, iree_string_view_t driver_name,
     iree_string_view_t device_path, iree_host_size_t param_count,
     const iree_string_pair_t* params, iree_allocator_t host_allocator,
@@ -582,7 +582,7 @@ static iree_status_t iree_hal_hip_driver_create_multi_device_by_path(
     idx++;
   }
 
-  iree_status_t status = iree_hal_hip_driver_create_multi_device_by_ids(
+  iree_status_t status = iree_hal_hip_driver_create_multi_queue_device_by_ids(
       base_driver, device_ids, idx, param_count, params, host_allocator,
       out_device);
   iree_allocator_free(host_allocator, device_ids);
@@ -605,7 +605,7 @@ static iree_status_t iree_hal_hip_driver_create_device_by_path(
 
   if (iree_string_view_find_char(device_path, ',', 0) !=
       IREE_STRING_VIEW_NPOS) {
-    return iree_hal_hip_driver_create_multi_device_by_path(
+    return iree_hal_hip_driver_create_multi_queue_device_by_path(
         base_driver, driver_name, device_path, param_count, params,
         host_allocator, out_device);
   }

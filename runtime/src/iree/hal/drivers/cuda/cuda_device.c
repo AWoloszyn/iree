@@ -726,6 +726,13 @@ static iree_status_t iree_hal_cuda_device_query_i64(
     return iree_ok_status();
   }
 
+  if (iree_string_view_equal(category, IREE_SV("hal.device"))) {
+    if (iree_string_view_equal(key, IREE_SV("concurrency"))) {
+      *out_value = 1;
+      return iree_ok_status();
+    }
+  }
+
   if (iree_string_view_equal(category, IREE_SV("cuda.device"))) {
     if (iree_string_view_equal(key, IREE_SV("compute_capability_major"))) {
       return iree_hal_cuda_device_query_attribute(

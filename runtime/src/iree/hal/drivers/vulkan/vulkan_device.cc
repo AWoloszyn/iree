@@ -1457,6 +1457,13 @@ static iree_status_t iree_hal_vulkan_device_query_i64(
     }
   }
 
+  if (iree_string_view_equal(category, IREE_SV("hal.device"))) {
+    if (iree_string_view_equal(key, IREE_SV("concurrency"))) {
+      *out_value = 1;
+      return iree_ok_status();
+    }
+  }
+
   // Note that the device queries used here should match the ones used in
   // buildDeviceQueryRegion() on the compiler side.
   if (iree_string_view_equal(category, IREE_SV("hal.dispatch"))) {

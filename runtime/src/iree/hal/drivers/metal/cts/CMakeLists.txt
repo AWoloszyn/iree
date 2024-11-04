@@ -24,7 +24,6 @@ iree_hal_cts_test_suite(
     # https://github.com/iree-org/iree/pull/17080#discussion_r1569867998
     "semaphore_submission"
     "semaphore"
-    ${IREE_MULTI_DEVICE_CTS_TESTS} # Device groups not supported yet
   LABELS
     driver=metal
 )

@@ -228,6 +228,13 @@ static iree_status_t iree_hal_metal_device_query_i64(iree_hal_device_t* base_dev
     *out_value = iree_string_view_equal(key, iree_make_cstring_view("metal-msl-fb")) ? 1 : 0;
     return iree_ok_status();
   }
+  
+  if (iree_string_view_equal(category, IREE_SV("hal.device"))) {
+    if (iree_string_view_equal(key, IREE_SV("concurrency"))) {
+      *out_value = 1;
+      return iree_ok_status();
+    }
+  }
 
   return iree_make_status(IREE_STATUS_NOT_FOUND,
                           "unknown device configuration key value '%.*s :: %.*s'",

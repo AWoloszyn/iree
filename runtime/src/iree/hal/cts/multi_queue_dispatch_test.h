@@ -18,7 +18,7 @@
 namespace iree::hal::cts {
 using ::testing::ContainerEq;
 
-class DeviceGroupCommandBufferDispatchTest : public CTSTestBase<> {
+class MultiQueueCommandBufferDispatchTest : public CTSTestBase<> {
  protected:
   void PrepareAbsExecutable() {
     IREE_ASSERT_OK(iree_hal_executable_cache_create(
@@ -44,6 +44,17 @@ class DeviceGroupCommandBufferDispatchTest : public CTSTestBase<> {
     IREE_ASSERT_OK(loop_status_);
   }
 
+  virtual void SetUp() {
+    CTSTestBase<>::SetUp();
+    int64_t concurrency;
+    IREE_ASSERT_OK(iree_hal_device_query_i64(
+        device_, IREE_SV("hal.device"), IREE_SV("concurrency"), &concurrency));
+    if (concurrency < 2) {
+      GTEST_SKIP() << "Test requires at least two queues";
+      return;
+    }
+  }
+
   iree_status_t loop_status_ = iree_ok_status();
   iree_hal_executable_cache_t* executable_cache_ = NULL;
   iree_hal_executable_t* executable_ = NULL;
@@ -52,7 +63,7 @@ class DeviceGroupCommandBufferDispatchTest : public CTSTestBase<> {
 // Dispatches absf(x) on a two subranges (elements 8-9 and 16-17) of a 32
 // element input buffer. input_buffer  = [-2.5 -2.5 -2.5 -2.5, ...]
 // output_buffer = [-9.0  -9.0, -9.0, -9.0, 2.5, 2.5, -9.0, ......, 2.5, 2.5]
-TEST_F(DeviceGroupCommandBufferDispatchTest,
+TEST_F(MultiQueueCommandBufferDispatchTest,
        DispatchSameCommandListInTwoPlaces) {
   PrepareAbsExecutable();
 

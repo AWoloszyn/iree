@@ -4,38 +4,37 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/drivers/hip/hip_multi_device_command_buffer.h"
-
 #include "iree/base/internal/arena.h"
 #include "iree/base/internal/math.h"
+#include "iree/hal/drivers/hip/hip_multi_queue_command_buffer.h"
 #include "iree/hal/drivers/hip/status_util.h"
 #include "iree/hal/utils/resource_set.h"
 
 //===----------------------------------------------------------------------===//
-// iree_hal_hip_multi_device_command_buffer_t implementation
+// iree_hal_hip_multi_queue_command_buffer_t implementation
 //===----------------------------------------------------------------------===//
 
-typedef struct iree_hal_hip_multi_device_command_buffer_t {
+typedef struct iree_hal_hip_multi_queue_command_buffer_t {
   iree_hal_command_buffer_t base;
   uint32_t command_buffer_count;
   uint32_t num_devices;
   iree_hal_hip_per_device_information_t* device_contexts;
   const iree_hal_hip_dynamic_symbols_t* hip_symbols;
   iree_hal_command_buffer_t* child_buffers[];
-} iree_hal_hip_multi_device_command_buffer_t;
+} iree_hal_hip_multi_queue_command_buffer_t;
 
 static const iree_hal_command_buffer_vtable_t
-    iree_hal_hip_multi_device_command_buffer_vtable;
+    iree_hal_hip_multi_queue_command_buffer_vtable;
 
-static iree_hal_hip_multi_device_command_buffer_t*
-iree_hal_hip_multi_device_command_buffer_cast(
+static iree_hal_hip_multi_queue_command_buffer_t*
+iree_hal_hip_multi_queue_command_buffer_cast(
     iree_hal_command_buffer_t* base_value) {
   IREE_HAL_ASSERT_TYPE(base_value,
-                       &iree_hal_hip_multi_device_command_buffer_vtable);
-  return (iree_hal_hip_multi_device_command_buffer_t*)base_value;
+                       &iree_hal_hip_multi_queue_command_buffer_vtable);
+  return (iree_hal_hip_multi_queue_command_buffer_t*)base_value;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_hip_multi_device_command_buffer_create(
+IREE_API_EXPORT iree_status_t iree_hal_hip_multi_queue_command_buffer_create(
     iree_allocator_t host_allocator, uint32_t command_buffer_count,
     iree_hal_command_buffer_t** in_command_buffers,
     iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
@@ -55,7 +54,7 @@ IREE_API_EXPORT iree_status_t iree_hal_hip_multi_device_command_buffer_create(
 
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer = NULL;
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(
               host_allocator,
@@ -69,7 +68,7 @@ IREE_API_EXPORT iree_status_t iree_hal_hip_multi_device_command_buffer_create(
       binding_capacity,
       (uint8_t*)command_buffer + sizeof(*command_buffer) +
           command_buffer_count * sizeof(iree_hal_command_buffer_t*),
-      &iree_hal_hip_multi_device_command_buffer_vtable, &command_buffer->base);
+      &iree_hal_hip_multi_queue_command_buffer_vtable, &command_buffer->base);
   memcpy(command_buffer->child_buffers, in_command_buffers,
          sizeof(iree_hal_command_buffer_t*) * command_buffer_count);
 
@@ -82,10 +81,10 @@ IREE_API_EXPORT iree_status_t iree_hal_hip_multi_device_command_buffer_create(
   return iree_ok_status();
 }
 
-static void iree_hal_hip_multi_device_command_buffer_destroy(
+static void iree_hal_hip_multi_queue_command_buffer_destroy(
     iree_hal_command_buffer_t* base_command_buffer) {
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
   for (uint16_t i = 0; i < command_buffer->command_buffer_count; ++i) {
     if (command_buffer->child_buffers[i]) {
@@ -95,10 +94,10 @@ static void iree_hal_hip_multi_device_command_buffer_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
-IREE_API_EXPORT bool iree_hal_hip_multi_device_command_buffer_isa(
+IREE_API_EXPORT bool iree_hal_hip_multi_queue_command_buffer_isa(
     iree_hal_command_buffer_t* command_buffer) {
   return iree_hal_resource_is(&command_buffer->resource,
-                              &iree_hal_hip_multi_device_command_buffer_vtable);
+                              &iree_hal_hip_multi_queue_command_buffer_vtable);
 }
 
 #define CALL_COMMAND(status, command)                                         \
@@ -123,27 +122,27 @@ IREE_API_EXPORT bool iree_hal_hip_multi_device_command_buffer_isa(
     ++num;                                                                    \
   }
 
-static iree_status_t iree_hal_hip_multi_device_command_buffer_begin(
+static iree_status_t iree_hal_hip_multi_queue_command_buffer_begin(
     iree_hal_command_buffer_t* base_command_buffer) {
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status, iree_hal_command_buffer_begin(
                            command_buffer->child_buffers[num]));
   return status;
 }
 
-static iree_status_t iree_hal_hip_multi_device_command_buffer_end(
+static iree_status_t iree_hal_hip_multi_queue_command_buffer_end(
     iree_hal_command_buffer_t* base_command_buffer) {
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status,
                iree_hal_command_buffer_end(command_buffer->child_buffers[num]));
   return status;
 }
 
-static iree_status_t iree_hal_hip_multi_device_command_buffer_execution_barrier(
+static iree_status_t iree_hal_hip_multi_queue_command_buffer_execution_barrier(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
@@ -152,8 +151,8 @@ static iree_status_t iree_hal_hip_multi_device_command_buffer_execution_barrier(
     const iree_hal_memory_barrier_t* memory_barriers,
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers) {
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status,
                iree_hal_command_buffer_execution_barrier(
@@ -163,11 +162,11 @@ static iree_status_t iree_hal_hip_multi_device_command_buffer_execution_barrier(
   return status;
 }
 
-static iree_status_t iree_hal_hip_multi_device_command_buffer_signal_event(
+static iree_status_t iree_hal_hip_multi_queue_command_buffer_signal_event(
     iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
     iree_hal_execution_stage_t source_stage_mask) {
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status, iree_hal_command_buffer_signal_event(
                            command_buffer->child_buffers[num], event,
@@ -175,11 +174,11 @@ static iree_status_t iree_hal_hip_multi_device_command_buffer_signal_event(
   return status;
 }
 
-static iree_status_t iree_hal_hip_multi_device_command_buffer_reset_event(
+static iree_status_t iree_hal_hip_multi_queue_command_buffer_reset_event(
     iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
     iree_hal_execution_stage_t source_stage_mask) {
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status, iree_hal_command_buffer_reset_event(
                            command_buffer->child_buffers[num], event,
@@ -187,7 +186,7 @@ static iree_status_t iree_hal_hip_multi_device_command_buffer_reset_event(
   return status;
 }
 
-static iree_status_t iree_hal_hip_multi_device_command_buffer_wait_events(
+static iree_status_t iree_hal_hip_multi_queue_command_buffer_wait_events(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_host_size_t event_count, const iree_hal_event_t** events,
     iree_hal_execution_stage_t source_stage_mask,
@@ -196,8 +195,8 @@ static iree_status_t iree_hal_hip_multi_device_command_buffer_wait_events(
     const iree_hal_memory_barrier_t* memory_barriers,
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers) {
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status,
                iree_hal_command_buffer_wait_events(
@@ -207,23 +206,23 @@ static iree_status_t iree_hal_hip_multi_device_command_buffer_wait_events(
   return status;
 }
 
-static iree_status_t iree_hal_hip_multi_device_command_buffer_discard_buffer(
+static iree_status_t iree_hal_hip_multi_queue_command_buffer_discard_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t buffer_ref) {
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status, iree_hal_command_buffer_discard_buffer(
                            command_buffer->child_buffers[num], buffer_ref));
   return status;
 }
 
-static iree_status_t iree_hal_hip_multi_device_command_buffer_fill_buffer(
+static iree_status_t iree_hal_hip_multi_queue_command_buffer_fill_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t target_ref, const void* pattern,
     iree_host_size_t pattern_length) {
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status, iree_hal_command_buffer_fill_buffer(
                            command_buffer->child_buffers[num], target_ref,
@@ -231,11 +230,11 @@ static iree_status_t iree_hal_hip_multi_device_command_buffer_fill_buffer(
   return status;
 }
 
-static iree_status_t iree_hal_hip_multi_device_command_buffer_update_buffer(
+static iree_status_t iree_hal_hip_multi_queue_command_buffer_update_buffer(
     iree_hal_command_buffer_t* base_command_buffer, const void* source_buffer,
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref) {
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status, iree_hal_command_buffer_update_buffer(
                            command_buffer->child_buffers[num], source_buffer,
@@ -243,11 +242,11 @@ static iree_status_t iree_hal_hip_multi_device_command_buffer_update_buffer(
   return status;
 }
 
-static iree_status_t iree_hal_hip_multi_device_command_buffer_copy_buffer(
+static iree_status_t iree_hal_hip_multi_queue_command_buffer_copy_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t source_ref, iree_hal_buffer_ref_t target_ref) {
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status,
                iree_hal_command_buffer_copy_buffer(
@@ -255,12 +254,12 @@ static iree_status_t iree_hal_hip_multi_device_command_buffer_copy_buffer(
   return status;
 }
 
-static iree_status_t iree_hal_hip_multi_device_command_buffer_collective(
+static iree_status_t iree_hal_hip_multi_queue_command_buffer_collective(
     iree_hal_command_buffer_t* base_command_buffer, iree_hal_channel_t* channel,
     iree_hal_collective_op_t op, uint32_t param, iree_hal_buffer_ref_t send_ref,
     iree_hal_buffer_ref_t recv_ref, iree_device_size_t element_count) {
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status, iree_hal_command_buffer_collective(
                            command_buffer->child_buffers[num], channel, op,
@@ -268,13 +267,13 @@ static iree_status_t iree_hal_hip_multi_device_command_buffer_collective(
   return status;
 }
 
-static iree_status_t iree_hal_hip_multi_device_command_buffer_dispatch(
+static iree_status_t iree_hal_hip_multi_queue_command_buffer_dispatch(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_executable_t* executable, int32_t entry_point,
     const uint32_t workgroup_count[3], iree_const_byte_span_t constants,
     iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags) {
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status,
                iree_hal_command_buffer_dispatch(
@@ -283,13 +282,13 @@ static iree_status_t iree_hal_hip_multi_device_command_buffer_dispatch(
   return status;
 }
 
-static iree_status_t iree_hal_hip_multi_device_command_buffer_dispatch_indirect(
+static iree_status_t iree_hal_hip_multi_queue_command_buffer_dispatch_indirect(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_executable_t* executable, int32_t entry_point,
     iree_hal_buffer_ref_t workgroups_ref, iree_const_byte_span_t constants,
     iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags) {
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   iree_status_t status = iree_ok_status();
   CALL_COMMAND(status,
                iree_hal_command_buffer_dispatch_indirect(
@@ -298,7 +297,7 @@ static iree_status_t iree_hal_hip_multi_device_command_buffer_dispatch_indirect(
   return status;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_hip_multi_device_command_buffer_get(
+IREE_API_EXPORT iree_status_t iree_hal_hip_multi_queue_command_buffer_get(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_queue_affinity_t affinity,
     iree_hal_command_buffer_t** out_command_buffer) {
@@ -306,8 +305,8 @@ IREE_API_EXPORT iree_status_t iree_hal_hip_multi_device_command_buffer_get(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "One and only one device may be specified.");
   }
-  iree_hal_hip_multi_device_command_buffer_t* command_buffer =
-      iree_hal_hip_multi_device_command_buffer_cast(base_command_buffer);
+  iree_hal_hip_multi_queue_command_buffer_t* command_buffer =
+      iree_hal_hip_multi_queue_command_buffer_cast(base_command_buffer);
   if (!(command_buffer->base.queue_affinity & affinity)) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "No command buffer for affinity %lu", affinity);
@@ -320,24 +319,24 @@ IREE_API_EXPORT iree_status_t iree_hal_hip_multi_device_command_buffer_get(
 }
 
 static const iree_hal_command_buffer_vtable_t
-    iree_hal_hip_multi_device_command_buffer_vtable = {
-        .destroy = iree_hal_hip_multi_device_command_buffer_destroy,
-        .begin = iree_hal_hip_multi_device_command_buffer_begin,
-        .end = iree_hal_hip_multi_device_command_buffer_end,
+    iree_hal_hip_multi_queue_command_buffer_vtable = {
+        .destroy = iree_hal_hip_multi_queue_command_buffer_destroy,
+        .begin = iree_hal_hip_multi_queue_command_buffer_begin,
+        .end = iree_hal_hip_multi_queue_command_buffer_end,
         .execution_barrier =
-            iree_hal_hip_multi_device_command_buffer_execution_barrier,
-        .signal_event = iree_hal_hip_multi_device_command_buffer_signal_event,
-        .reset_event = iree_hal_hip_multi_device_command_buffer_reset_event,
-        .wait_events = iree_hal_hip_multi_device_command_buffer_wait_events,
+            iree_hal_hip_multi_queue_command_buffer_execution_barrier,
+        .signal_event = iree_hal_hip_multi_queue_command_buffer_signal_event,
+        .reset_event = iree_hal_hip_multi_queue_command_buffer_reset_event,
+        .wait_events = iree_hal_hip_multi_queue_command_buffer_wait_events,
         .discard_buffer =
-            iree_hal_hip_multi_device_command_buffer_discard_buffer,
-        .fill_buffer = iree_hal_hip_multi_device_command_buffer_fill_buffer,
-        .update_buffer = iree_hal_hip_multi_device_command_buffer_update_buffer,
-        .copy_buffer = iree_hal_hip_multi_device_command_buffer_copy_buffer,
-        .collective = iree_hal_hip_multi_device_command_buffer_collective,
-        .dispatch = iree_hal_hip_multi_device_command_buffer_dispatch,
+            iree_hal_hip_multi_queue_command_buffer_discard_buffer,
+        .fill_buffer = iree_hal_hip_multi_queue_command_buffer_fill_buffer,
+        .update_buffer = iree_hal_hip_multi_queue_command_buffer_update_buffer,
+        .copy_buffer = iree_hal_hip_multi_queue_command_buffer_copy_buffer,
+        .collective = iree_hal_hip_multi_queue_command_buffer_collective,
+        .dispatch = iree_hal_hip_multi_queue_command_buffer_dispatch,
         .dispatch_indirect =
-            iree_hal_hip_multi_device_command_buffer_dispatch_indirect,
+            iree_hal_hip_multi_queue_command_buffer_dispatch_indirect,
 };
 
 #undef CALL_COMMAND
