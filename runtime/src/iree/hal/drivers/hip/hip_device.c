@@ -268,7 +268,7 @@ static iree_status_t iree_hal_hip_device_initialize_internal(
           IREE_HAL_STREAM_TRACING_VERBOSITY_MAX);
     }
 
-    for (uint32_t i = 0; i < device->num_physical_devices; ++i) {
+    for (iree_host_size_t i = 0; i < device->num_physical_devices; ++i) {
       iree_hal_hip_tracing_device_interface_t* tracing_device_interface;
       status = iree_allocator_malloc(
           host_allocator, sizeof(iree_hal_hip_tracing_device_interface_t),
@@ -310,7 +310,7 @@ static iree_status_t iree_hal_hip_device_initialize_internal(
   // Memory pool support is conditional.
   if (iree_status_is_ok(status) && params->async_allocations) {
     device->supports_memory_pools = true;
-    for (uint32_t i = 0; i < device->num_physical_devices; ++i) {
+    for (iree_host_size_t i = 0; i < device->num_physical_devices; ++i) {
       int supports_memory_pools = 0;
       status = IREE_HIP_RESULT_TO_STATUS(
           symbols,
@@ -373,7 +373,8 @@ iree_status_t iree_hal_hip_device_create(
   iree_status_t status = iree_hal_hip_device_check_params(params);
 
   // Get the main context for the device.
-  for (uint32_t i = 0; i < device_count && iree_status_is_ok(status); ++i) {
+  for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
+       ++i) {
     device->device_contexts[i].hip_device = devices[i];
     status = IREE_HIP_RESULT_TO_STATUS(
         symbols, hipDevicePrimaryCtxRetain(
@@ -392,7 +393,8 @@ iree_status_t iree_hal_hip_device_create(
     }
 
     if (iree_status_is_ok(status)) {
-      for (uint32_t j = 0; j < device_count && iree_status_is_ok(status); ++j) {
+      for (iree_host_size_t j = 0;
+           j < device_count && iree_status_is_ok(status); ++j) {
         if (i == j) {
           continue;
         }
@@ -407,7 +409,8 @@ iree_status_t iree_hal_hip_device_create(
         driver, identifier, params, device, symbols, nccl_symbols,
         host_allocator);
   } else {
-    for (uint32_t i = 0; i < device_count && iree_status_is_ok(status); ++i) {
+    for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
+         ++i) {
       if (device->device_contexts[i].hip_dispatch_stream)
         symbols->hipStreamDestroy(
             device->device_contexts[i].hip_dispatch_stream);
@@ -425,7 +428,8 @@ iree_status_t iree_hal_hip_device_create(
                                       host_allocator, &host_event_pool);
   }
 
-  for (uint32_t i = 0; i < device_count && iree_status_is_ok(status); ++i) {
+  for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
+       ++i) {
     if (iree_status_is_ok(status)) {
       status = iree_hal_hip_event_pool_allocate(
           symbols, params->event_pool_capacity, host_allocator,
@@ -439,7 +443,7 @@ iree_status_t iree_hal_hip_device_create(
     *out_device = (iree_hal_device_t*)device;
   } else {
     // Release resources we have accquired after HAL device creation.
-    for (uint32_t i = 0; i < device_count; ++i) {
+    for (iree_host_size_t i = 0; i < device_count; ++i) {
       if (device->device_contexts[i].device_event_pool)
         iree_hal_hip_event_pool_release(
             device->device_contexts[i].device_event_pool);
@@ -476,12 +480,12 @@ static void iree_hal_hip_device_destroy(iree_hal_device_t* base_device) {
 
   // Destroy memory pools that hold on to reserved memory.
   iree_hal_hip_memory_pools_deinitialize(&device->memory_pools);
-  for (uint32_t i = 0; i < device->num_physical_devices; ++i) {
+  for (iree_host_size_t i = 0; i < device->num_physical_devices; ++i) {
     iree_hal_stream_tracing_context_free(
         device->device_contexts[i].tracing_context);
   }
 
-  for (uint32_t i = 0; i < device->num_physical_devices; ++i) {
+  for (iree_host_size_t i = 0; i < device->num_physical_devices; ++i) {
     if (device->device_contexts[i].device_event_pool) {
       iree_hal_hip_event_pool_release(
           device->device_contexts[i].device_event_pool);
@@ -489,7 +493,7 @@ static void iree_hal_hip_device_destroy(iree_hal_device_t* base_device) {
   }
   if (device->host_event_pool) iree_event_pool_free(device->host_event_pool);
 
-  for (uint32_t i = 0; i < device->num_physical_devices; ++i) {
+  for (iree_host_size_t i = 0; i < device->num_physical_devices; ++i) {
     IREE_HIP_IGNORE_ERROR(
         symbols,
         hipStreamDestroy(device->device_contexts[i].hip_dispatch_stream));
@@ -748,7 +752,7 @@ static iree_status_t iree_hal_hip_device_create_command_buffer_internal(
   }
 
   if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
-    for (uint32_t i = 0; i < IREE_HAL_MAX_QUEUES; ++i) {
+    for (iree_host_size_t i = 0; i < IREE_HAL_MAX_QUEUES; ++i) {
       if (buffers[i]) {
         iree_hal_resource_release(buffers[i]);
       }
