@@ -40,20 +40,8 @@ typedef struct iree_hal_hip_native_executable_t {
   const iree_hal_hip_dynamic_symbols_t* symbols;
 
   uint32_t num_devices;
-  iree_host_size_t native_info_device_size;
-  iree_hal_hip_native_executable_per_device_data_t per_device_data[];
+  iree_hal_hip_native_executable_per_device_data_t* per_device_data[];
 } iree_hal_hip_native_executable_t;
-
-static iree_hal_hip_native_executable_per_device_data_t*
-iree_hal_hip_native_executable_get_per_device_data(
-    iree_hal_hip_native_executable_t* executable, size_t i) {
-  return (
-      iree_hal_hip_native_executable_per_device_data_t*)((uint8_t*)executable
-                                                             ->per_device_data +
-                                                         executable
-                                                                 ->native_info_device_size *
-                                                             i);
-}
 
 static const iree_hal_executable_vtable_t iree_hal_hip_native_executable_vtable;
 
@@ -277,13 +265,15 @@ iree_status_t iree_hal_hip_native_executable_create(
   iree_hal_hip_native_executable_t* executable = NULL;
   iree_host_size_t native_executable_device_info_size =
       sizeof(iree_hal_hip_native_executable_per_device_data_t) +
-      module_count * sizeof(executable->per_device_data[0].modules[0]) +
-      export_count * sizeof(executable->per_device_data->exports[0]) +
+      module_count * sizeof(executable->per_device_data[0]->modules[0]) +
+      export_count * sizeof(executable->per_device_data[0]->exports[0]) +
       total_export_info_length;
   native_executable_device_info_size += 7;
   native_executable_device_info_size &= ~((iree_host_size_t)0x7);
   const iree_host_size_t total_size =
-      sizeof(*executable) + num_devices * native_executable_device_info_size;
+      sizeof(*executable) +
+      num_devices * sizeof(executable->per_device_data[0]) +
+      num_devices * native_executable_device_info_size;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       iree_allocator_malloc(host_allocator, total_size, (void**)&executable));
@@ -291,8 +281,23 @@ iree_status_t iree_hal_hip_native_executable_create(
                                &executable->resource);
   executable->host_allocator = host_allocator;
   executable->symbols = symbols;
-  executable->native_info_device_size = native_executable_device_info_size;
   executable->num_devices = num_devices;
+
+  for (size_t i = 0; i < num_devices; ++i) {
+    executable->per_device_data[i] =
+        (iree_hal_hip_native_executable_per_device_data_t*)((uint8_t*)
+                                                                executable +
+                                                            sizeof(
+                                                                *executable) +
+                                                            (num_devices *
+                                                             sizeof(
+                                                                 executable
+                                                                     ->per_device_data
+                                                                         [0])) +
+                                                            (i *
+                                                             native_executable_device_info_size));
+  }
+
   iree_status_t status = iree_ok_status();
 
   for (size_t j = 0; j < num_devices && iree_status_is_ok(status); ++j) {
@@ -304,7 +309,7 @@ iree_status_t iree_hal_hip_native_executable_create(
       break;
     }
     iree_hal_hip_native_executable_per_device_data_t* ned =
-        iree_hal_hip_native_executable_get_per_device_data(executable, j);
+        executable->per_device_data[j];
 
     ned->module_count = module_count;
     ned->modules = (hipModule_t*)((uint8_t*)ned + sizeof(*ned) +
@@ -456,7 +461,7 @@ static void iree_hal_hip_native_executable_destroy(
 
   for (iree_host_size_t j = 0; j < executable->num_devices; ++j) {
     iree_hal_hip_native_executable_per_device_data_t* data =
-        iree_hal_hip_native_executable_get_per_device_data(executable, j);
+        executable->per_device_data[j];
     for (iree_host_size_t i = 0; i < data->module_count; ++i) {
       if (data->modules[i]) {
         IREE_HIP_IGNORE_ERROR(executable->symbols,
@@ -485,8 +490,7 @@ iree_status_t iree_hal_hip_native_executable_lookup_kernel_params(
   }
 
   iree_hal_hip_native_executable_per_device_data_t* data =
-      iree_hal_hip_native_executable_get_per_device_data(executable,
-                                                         device_idx);
+      executable->per_device_data[device_idx];
   if (ordinal >= data->export_count) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,

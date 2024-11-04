@@ -1314,7 +1314,8 @@ static iree_status_t iree_hal_hip_device_make_callback_data(
 
   callback_data->device = device;
 
-  callback_data->wait_semaphore_count = wait_semaphore_list.count;
+  iree_atomic_ref_count_init_value(&callback_data->wait_semaphore_count,
+                                   wait_semaphore_list.count);
   // Copy wait list for later access.
   callback_data->wait_semaphore_list.count = wait_semaphore_list.count;
   callback_data->wait_semaphore_list.semaphores =
