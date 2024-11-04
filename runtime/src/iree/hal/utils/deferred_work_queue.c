@@ -65,8 +65,8 @@ typedef struct iree_hal_deferred_work_queue_action_t {
     struct {
       iree_host_size_t count;
       iree_hal_command_buffer_t** command_buffers;
-      iree_hal_buffer_binding_table_t* binding_tables;
       iree_hal_queue_affinity_t queue_affinity;
+      iree_hal_buffer_binding_table_t* binding_tables;
     } execution;
   } payload;
 
