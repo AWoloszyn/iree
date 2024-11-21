@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_HIP_PER_DEVICE_INFORMATION_H_
 
 #include "iree/hal/drivers/hip/hip_headers.h"
+#include "iree/hal/drivers/hip/dispatch_thread.h"
 
 typedef struct iree_hal_stream_tracing_context_t
     iree_hal_stream_tracing_context_t;
@@ -21,6 +22,8 @@ typedef struct iree_hal_hip_per_device_info_t {
   iree_hal_stream_tracing_context_t* tracing_context;
 
   iree_hal_hip_event_pool_t* device_event_pool;
+
+  iree_hal_hip_dispatch_thread_t* dispatch_thread;
 } iree_hal_hip_per_device_info_t;
 
 typedef struct iree_hal_hip_device_topology_t {
