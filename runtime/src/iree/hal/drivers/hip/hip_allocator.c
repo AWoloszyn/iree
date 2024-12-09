@@ -25,7 +25,7 @@ typedef struct iree_hal_hip_allocator_t {
   // must be at offset 0.
   iree_hal_resource_t resource;
 
-  iree_hal_hip_device_topology_t* topology;
+  iree_hal_hip_device_topology_t topology;
 
   bool supports_memory_pools;
 
@@ -51,13 +51,13 @@ static iree_hal_hip_allocator_t* iree_hal_hip_allocator_cast(
 
 iree_status_t iree_hal_hip_allocator_create(
     const iree_hal_hip_dynamic_symbols_t* hip_symbols,
-    iree_hal_hip_device_topology_t* topology, bool supports_memory_pools,
+    iree_hal_hip_device_topology_t topology, bool supports_memory_pools,
     iree_allocator_t host_allocator, iree_hal_allocator_t** out_allocator) {
   IREE_ASSERT_ARGUMENT(hip_symbols);
   IREE_ASSERT_ARGUMENT(out_allocator);
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_allocator = NULL;
-  if (topology->count < 1) {
+  if (topology.count < 1) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "at least one device must be specified");
@@ -75,7 +75,7 @@ iree_status_t iree_hal_hip_allocator_create(
               hip_symbols,
               hipDeviceGetAttribute(&supports_concurrent_managed_access,
                                     hipDeviceAttributeConcurrentManagedAccess,
-                                    topology->devices[0].hip_device),
+                                    topology.devices[0].hip_device),
               "hipDeviceGetAttribute"));
 
   IREE_TRACE_ZONE_APPEND_TEXT(
@@ -138,9 +138,9 @@ static void iree_hal_hip_allocator_query_statistics(
     memcpy(out_statistics, &allocator->statistics, sizeof(*out_statistics));
 
     if (allocator->supports_memory_pools) {
-      for (iree_host_size_t i = 0; i < allocator->topology->count; ++i) {
+      for (iree_host_size_t i = 0; i < allocator->topology.count; ++i) {
         iree_hal_hip_memory_pools_merge_statistics(
-            &allocator->topology->devices[i].memory_pools, out_statistics);
+            &allocator->topology.devices[i].memory_pools, out_statistics);
       }
     }
   });
@@ -370,7 +370,7 @@ static iree_status_t iree_hal_hip_allocator_allocate_buffer(
       z0, IREE_HIP_CALL_TO_STATUS(
               allocator->symbols,
               hipCtxPushCurrent(
-                  allocator->topology->devices[device_ordinal].hip_context)));
+                  allocator->topology.devices[device_ordinal].hip_context)));
 
   if (iree_all_bits_set(compat_params.type,
                         IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL)) {
@@ -389,8 +389,8 @@ static iree_status_t iree_hal_hip_allocator_allocate_buffer(
             allocator->symbols,
             hipMemPrefetchAsync(
                 device_ptr, allocation_size,
-                allocator->topology->devices[device_ordinal].hip_device,
-                allocator->topology->devices[device_ordinal]
+                allocator->topology.devices[device_ordinal].hip_device,
+                allocator->topology.devices[device_ordinal]
                     .hip_dispatch_stream));
       }
       host_ptr = (void*)device_ptr;
@@ -532,7 +532,7 @@ static iree_status_t iree_hal_hip_allocator_import_buffer(
   IREE_RETURN_IF_ERROR(IREE_HIP_CALL_TO_STATUS(
       allocator->symbols,
       hipCtxPushCurrent(
-          allocator->topology->devices[device_ordinal].hip_context)));
+          allocator->topology.devices[device_ordinal].hip_context)));
 
   iree_status_t status = iree_ok_status();
   iree_hal_hip_buffer_type_t buffer_type = IREE_HAL_HIP_BUFFER_TYPE_DEVICE;
