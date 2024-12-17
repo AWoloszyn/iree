@@ -20,11 +20,12 @@
 
 IREE_FLAG(
     string, parameter_mode, "mmap",
-    "A parameter I/O mode of ['preload', 'mmap'].\n"
+    "A parameter I/O mode of ['preload', 'mmap', 'file'].\n"
     "  preload: read entire parameter files into wired memory on startup.\n"
     "  mmap: maps the parameter files into discardable memory - can increase\n"
     "        warm-up time and variance as mapped pages are swapped\n"
-    "        by the OS.");
+    "        by the OS.\n"
+    "  file: uses platform file APIs to read/write the file as needed.");
 
 static void iree_file_contents_release_callback(
     void* user_data, iree_io_file_handle_primitive_t handle_primitive) {
@@ -106,7 +107,8 @@ static iree_status_t iree_io_append_parameter_file_to_index(
       z0, iree_io_open_parameter_file(path, host_allocator, &file_handle));
 
   // Index the file based on its (inferred) format.
-  iree_status_t status = iree_io_parse_file_index(path, file_handle, index);
+  iree_status_t status =
+      iree_io_parse_file_index(path, file_handle, index, host_allocator);
 
   // Release our file reference - it's still retained by the index if it had any
   // parameters in it.
