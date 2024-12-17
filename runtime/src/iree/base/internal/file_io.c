@@ -265,7 +265,7 @@ static iree_status_t iree_file_map_contents_readonly_platform(
 
   // Map the memory.
   void* ptr =
-      mmap(NULL, (size_t)length, PROT_READ, MAP_SHARED, fileno(file), 0);
+      mmap(NULL, (size_t)length, PROT_READ, MAP_PRIVATE | MAP_POPULATE, fileno(file), 0);
   if (ptr == MAP_FAILED) {
     return iree_make_status(iree_status_code_from_errno(errno), "mmap failed");
   }
