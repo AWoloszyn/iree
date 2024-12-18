@@ -420,20 +420,42 @@ static iree_status_t iree_hal_hip_stream_command_buffer_copy_buffer(
 
   hipDeviceptr_t target_device_buffer = iree_hal_hip_buffer_device_pointer(
       iree_hal_buffer_allocated_buffer(target_ref.buffer));
-  iree_device_size_t target_offset =
-      iree_hal_buffer_byte_offset(target_ref.buffer) + target_ref.offset;
+  hipDeviceptr_t target_host_buffer = iree_hal_hip_buffer_host_pointer(
+      iree_hal_buffer_allocated_buffer(target_ref.buffer));
+  void* source_host_buffer = iree_hal_hip_buffer_host_pointer(iree_hal_buffer_allocated_buffer(source_ref.buffer));
   hipDeviceptr_t source_device_buffer = iree_hal_hip_buffer_device_pointer(
       iree_hal_buffer_allocated_buffer(source_ref.buffer));
+
+  iree_device_size_t target_offset =
+      iree_hal_buffer_byte_offset(target_ref.buffer) + target_ref.offset;
   iree_device_size_t source_offset =
       iree_hal_buffer_byte_offset(source_ref.buffer) + source_ref.offset;
-  hipDeviceptr_t dst = (uint8_t*)target_device_buffer + target_offset;
-  hipDeviceptr_t src = (uint8_t*)source_device_buffer + source_offset;
-
-  IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, command_buffer->hip_symbols,
-      hipMemcpyAsync(dst, src, target_ref.length, hipMemcpyDeviceToDevice,
-                     command_buffer->hip_stream),
-      "hipMemcpyAsync");
+  if (iree_hal_hip_buffer_type(iree_hal_buffer_allocated_buffer(source_ref.buffer))  == IREE_HAL_HIP_BUFFER_TYPE_HOST && 
+    iree_hal_hip_buffer_type(iree_hal_buffer_allocated_buffer(target_ref.buffer))  == IREE_HAL_HIP_BUFFER_TYPE_HOST) {
+      return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "host to host async transfers");
+    } else if (iree_hal_hip_buffer_type(iree_hal_buffer_allocated_buffer(source_ref.buffer))  == IREE_HAL_HIP_BUFFER_TYPE_HOST) {
+    void* src = (uint8_t*)source_host_buffer + source_offset;
+    hipDeviceptr_t dst = (uint8_t*)target_device_buffer + target_offset;
+    IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, command_buffer->hip_symbols,
+        hipMemcpyHtoDAsync(dst, src, target_ref.length, command_buffer->hip_stream),
+        "hipMemcpyHtoDAsync");
+  } else if (iree_hal_hip_buffer_type(iree_hal_buffer_allocated_buffer(target_ref.buffer))  == IREE_HAL_HIP_BUFFER_TYPE_HOST) {
+    hipDeviceptr_t src = (uint8_t*)source_device_buffer + source_offset;
+    void* dst = (uint8_t*)target_host_buffer + target_offset;
+    IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, command_buffer->hip_symbols,
+        hipMemcpyDtoHAsync(dst, src, target_ref.length, command_buffer->hip_stream),
+        "hipMemcpyDtoHAsync");
+  } else {
+    hipDeviceptr_t src = (uint8_t*)source_device_buffer + source_offset;
+    hipDeviceptr_t dst = (uint8_t*)target_device_buffer + target_offset;
+    IREE_HIP_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, command_buffer->hip_symbols,
+        hipMemcpyAsync(dst, src, target_ref.length, hipMemcpyDeviceToDevice,
+                      command_buffer->hip_stream),
+        "hipMemcpyAsync");
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
