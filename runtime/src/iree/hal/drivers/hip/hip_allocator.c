@@ -302,8 +302,7 @@ static void iree_hal_hip_buffer_free(
     }
     case IREE_HAL_HIP_BUFFER_TYPE_HOST: {
       IREE_TRACE_ZONE_APPEND_TEXT(z0, "hipHostFree");
-      //IREE_HIP_IGNORE_ERROR(hip_symbols, hipHostFree(host_ptr));
-      free(host_ptr);
+      IREE_HIP_IGNORE_ERROR(hip_symbols, hipHostFree(host_ptr));
       break;
     }
     case IREE_HAL_HIP_BUFFER_TYPE_HOST_REGISTERED: {
@@ -410,19 +409,18 @@ static iree_status_t iree_hal_hip_allocator_allocate_buffer(
   } else {
     // Host local case.
     buffer_type = IREE_HAL_HIP_BUFFER_TYPE_HOST;
-    //unsigned int flags = hipHostMallocDefault;
-    //if (!iree_all_bits_set(compat_params.type,
-    //                       IREE_HAL_MEMORY_TYPE_HOST_CACHED)) {
-    //  flags |= hipHostMallocWriteCombined;
-    //}
-    host_ptr = malloc(allocation_size);
-    //status = IREE_HIP_CALL_TO_STATUS(
-    //    allocator->symbols, hipHostMalloc(&host_ptr, allocation_size, flags));
-    //if (iree_status_is_ok(status)) {
-    //  status = IREE_HIP_CALL_TO_STATUS(
-    //      allocator->symbols,
-    //      hipHostGetDevicePointer(&device_ptr, host_ptr, /*flags=*/0));
-    //}
+    unsigned int flags = hipHostMallocMapped;
+    if (!iree_all_bits_set(compat_params.type,
+                           IREE_HAL_MEMORY_TYPE_HOST_CACHED)) {
+      flags |= hipHostMallocWriteCombined;
+    }
+    status = IREE_HIP_CALL_TO_STATUS(
+        allocator->symbols, hipHostMalloc(&host_ptr, allocation_size, flags));
+    if (iree_status_is_ok(status)) {
+      status = IREE_HIP_CALL_TO_STATUS(
+          allocator->symbols,
+          hipHostGetDevicePointer(&device_ptr, host_ptr, /*flags=*/0));
+    }
   }
   IREE_TRACE_ZONE_END(z0);
 
@@ -444,13 +442,11 @@ static iree_status_t iree_hal_hip_allocator_allocate_buffer(
   }
 
   if (iree_status_is_ok(status)) {
-    if (device_ptr) {
-      IREE_TRACE_ALLOC_NAMED(IREE_HAL_HIP_ALLOCATOR_ID,
-                            (void*)iree_hal_hip_buffer_device_pointer(buffer),
-                            allocation_size);
-      IREE_STATISTICS(iree_hal_allocator_statistics_record_alloc(
-          &allocator->statistics, compat_params.type, allocation_size));
-    }
+    IREE_TRACE_ALLOC_NAMED(IREE_HAL_HIP_ALLOCATOR_ID,
+                           (void*)iree_hal_hip_buffer_device_pointer(buffer),
+                           allocation_size);
+    IREE_STATISTICS(iree_hal_allocator_statistics_record_alloc(
+        &allocator->statistics, compat_params.type, allocation_size));
     *out_buffer = buffer;
   } else {
     if (!buffer && (device_ptr || host_ptr)) {
@@ -475,28 +471,25 @@ static void iree_hal_hip_allocator_deallocate_buffer(
   const iree_hal_hip_buffer_type_t buffer_type =
       iree_hal_hip_buffer_type(base_buffer);
 
+  iree_hal_hip_buffer_free(allocator->symbols, buffer_type,
+                           iree_hal_hip_buffer_device_pointer(base_buffer),
+                           iree_hal_hip_buffer_host_pointer(base_buffer));
+
   switch (buffer_type) {
     case IREE_HAL_HIP_BUFFER_TYPE_DEVICE:
     case IREE_HAL_HIP_BUFFER_TYPE_HOST: {
-      if (iree_hal_hip_buffer_device_pointer(base_buffer)) {
-        IREE_TRACE_FREE_NAMED(
-            IREE_HAL_HIP_ALLOCATOR_ID,
-            (void*)iree_hal_hip_buffer_device_pointer(base_buffer));
-        IREE_STATISTICS(iree_hal_allocator_statistics_record_free(
-            &allocator->statistics, iree_hal_buffer_memory_type(base_buffer),
-            iree_hal_buffer_allocation_size(base_buffer)));
-      }
+      IREE_TRACE_FREE_NAMED(
+          IREE_HAL_HIP_ALLOCATOR_ID,
+          (void*)iree_hal_hip_buffer_device_pointer(base_buffer));
+      IREE_STATISTICS(iree_hal_allocator_statistics_record_free(
+          &allocator->statistics, iree_hal_buffer_memory_type(base_buffer),
+          iree_hal_buffer_allocation_size(base_buffer)));
       break;
     }
     default:
       // Buffer type not tracked.
       break;
   }
-
-  iree_hal_hip_buffer_free(allocator->symbols, buffer_type,
-                           iree_hal_hip_buffer_device_pointer(base_buffer),
-                           iree_hal_hip_buffer_host_pointer(base_buffer));
-
 
   iree_hal_buffer_destroy(base_buffer);
 }

@@ -12,7 +12,7 @@
 
 // TODO(benvanik): make these either compile-time configuration options so we
 // can prune code paths or flags (somehow).
-#define IREE_HAL_MEMORY_FILE_CAN_IMPORT 0
+
 // When 1 a fast-path for importable memory will be used to avoid staging.
 #if !defined(IREE_HAL_MEMORY_FILE_CAN_IMPORT)
 #define IREE_HAL_MEMORY_FILE_CAN_IMPORT 1

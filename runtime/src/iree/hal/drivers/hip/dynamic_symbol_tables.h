@@ -84,8 +84,6 @@ IREE_HAL_HIP_REQUIRED_PFN_DECL(hipMemcpyAsync, void *, const void *, size_t,
                                hipMemcpyKind, hipStream_t)
 IREE_HAL_HIP_REQUIRED_PFN_DECL(hipMemcpyHtoDAsync, hipDeviceptr_t, void *,
                                size_t, hipStream_t)
-IREE_HAL_HIP_REQUIRED_PFN_DECL(hipMemcpyDtoHAsync, void *, hipDeviceptr_t,
-                               size_t, hipStream_t)
 IREE_HAL_HIP_REQUIRED_PFN_DECL(hipMemPoolCreate, hipMemPool_t *,
                                const hipMemPoolProps *)
 IREE_HAL_HIP_REQUIRED_PFN_DECL(hipMemPoolDestroy, hipMemPool_t)

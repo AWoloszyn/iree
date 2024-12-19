@@ -186,9 +186,6 @@ static bool iree_hal_hip_buffer_has_device_ptr(void* arg) {
 hipDeviceptr_t iree_hal_hip_buffer_device_pointer(
     iree_hal_buffer_t* base_buffer) {
   iree_hal_hip_buffer_t* buffer = iree_hal_hip_buffer_cast(base_buffer);
-  if (buffer->type == IREE_HAL_HIP_BUFFER_TYPE_HOST) {
-    return NULL;
-  }
   iree_notification_await(&buffer->device_ptr_notification,
                           iree_hal_hip_buffer_has_device_ptr, buffer,
                           iree_infinite_timeout());
