@@ -417,6 +417,9 @@ static iree_status_t iree_hal_hip_stream_command_buffer_copy_buffer(
 
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_hip_stream_command_buffer_flush_collectives(command_buffer));
+  IREE_HAL_STREAM_TRACE_ZONE_BEGIN(command_buffer->tracing_context,
+    &command_buffer->tracing_event_list,
+    IREE_HAL_STREAM_TRACING_VERBOSITY_FINE);
 
   hipDeviceptr_t target_device_buffer = iree_hal_hip_buffer_device_pointer(
       iree_hal_buffer_allocated_buffer(target_ref.buffer));
@@ -456,7 +459,10 @@ static iree_status_t iree_hal_hip_stream_command_buffer_copy_buffer(
                       command_buffer->hip_stream),
         "hipMemcpyAsync");
   }
-
+  IREE_HAL_STREAM_TRACE_ZONE_END(command_buffer->tracing_context,
+      &command_buffer->tracing_event_list,
+      IREE_HAL_STREAM_TRACING_VERBOSITY_FINE);
+  
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }

@@ -320,7 +320,7 @@ static iree_status_t iree_hal_fd_file_read(iree_hal_file_t* base_file,
       !iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
                          IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
     status =
-        iree_hal_buffer_mapping_flush_range(&mapping, buffer_offset, length);
+        iree_hal_buffer_mapping_flush_range(&mapping, 0, length);
   }
 
   return iree_status_join(status, iree_hal_buffer_unmap_range(&mapping));
