@@ -419,6 +419,16 @@ iree_status_t iree_hal_hip_device_create(
                                    hipStreamNonBlocking));
     }
 
+    static hipDevice_t global_device_list[64];
+    static size_t num_global_devices = 0;
+
+    for (iree_host_size_t j = 0;
+         j < num_global_devices && iree_status_is_ok(status); ++j) {
+      status = IREE_HIP_CALL_TO_STATUS(
+          symbols, hipDeviceEnablePeerAccess(global_device_list[j], 0));
+    }
+
+    global_device_list[num_global_devices++] = devices[i];
     if (iree_status_is_ok(status)) {
       for (iree_host_size_t j = 0;
            j < device_count && iree_status_is_ok(status); ++j) {
