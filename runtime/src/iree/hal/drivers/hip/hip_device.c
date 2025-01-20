@@ -936,6 +936,15 @@ iree_hal_hip_device_query_semaphore_compatibility(
   return IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_ONLY;
 }
 
+void iree_hal_hip_async_buffer_release(
+    void* user_data, struct iree_hal_buffer_t* buffer) {
+  iree_hal_hip_device_t* device = (iree_hal_hip_device_t*)user_data;
+  void* ptr = iree_hal_hip_buffer_device_pointer(buffer);
+  if (ptr) {
+    iree_hal_hip_allocator_free_async(device->device_allocator, buffer);
+  }
+}
+
 static iree_status_t iree_hal_hip_device_prepare_async_alloc(
     iree_hal_hip_device_t* device, iree_hal_buffer_params_t params,
     iree_device_size_t allocation_size,
@@ -952,13 +961,16 @@ static iree_status_t iree_hal_hip_device_prepare_async_alloc(
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS,
   };
 
+  iree_hal_buffer_release_callback_t callback = {
+    .fn = &iree_hal_hip_async_buffer_release,
+    .user_data = (void*)device
+  };
   iree_hal_buffer_t* buffer = NULL;
   iree_status_t status = iree_hal_hip_buffer_wrap(
       placement, params.type, params.access, params.usage, allocation_size,
       /*byte_offset=*/0,
       /*byte_length=*/allocation_size, IREE_HAL_HIP_BUFFER_TYPE_ASYNC,
-      /*device_ptr=*/NULL, /*host_ptr=*/NULL,
-      iree_hal_buffer_release_callback_null(), device->host_allocator, &buffer);
+      /*device_ptr=*/NULL, /*host_ptr=*/NULL, callback, device->host_allocator, &buffer);
 
   if (iree_status_is_ok(status)) {
     *out_buffer = buffer;

@@ -754,24 +754,34 @@ iree_status_t iree_hal_hip_allocator_alloc_async(
                             iree_hal_buffer_allocation_size(buffer),
                             IREE_HOST_SIZE_MAX);
   }
-
+  
   int device_ordinal = 0;
   device_ordinal = iree_math_count_trailing_zeros_u64(buffer->placement.queue_affinity);
 
+  iree_host_size_t allocation_size_request = (iree_host_size_t)iree_hal_buffer_allocation_size(buffer);
+
   hipDeviceptr_t ptr = NULL;
   iree_slim_mutex_lock(&allocator->async_allocation_mutex);
-  iree_hal_hip_util_tree_node_t* sized_allocations = iree_hal_hip_util_tree_get(
+  iree_hal_hip_util_tree_node_t* sized_allocations = iree_hal_hip_util_tree_lower_bound(
       &allocator->async_allocation_maps[device_ordinal].tree,
-      (iree_host_size_t)iree_hal_buffer_allocation_size(buffer));
+      allocation_size_request);
   if (sized_allocations != NULL) {
-    iree_hal_hip_async_allocation_map_item_t* queue_item =
-        (iree_hal_hip_async_allocation_map_item_t*)
-            iree_hal_hip_util_tree_node_get_value(sized_allocations);
-    if (iree_hal_hip_async_allocation_queue_count(&queue_item->queue) != 0) {
-      iree_hal_hip_async_allocation_t allocation =
-          iree_hal_hip_async_allocation_queue_at(&queue_item->queue, 0);
-      ptr = allocation.pointer;
-      iree_hal_hip_async_allocation_queue_pop_front(&queue_item->queue, 1);
+    iree_host_size_t actual_allocation_size = iree_hal_hip_util_tree_node_get_key(sized_allocations);
+    if (actual_allocation_size == allocation_size_request) {
+      iree_hal_hip_async_allocation_map_item_t* queue_item =
+          (iree_hal_hip_async_allocation_map_item_t*)
+              iree_hal_hip_util_tree_node_get_value(sized_allocations);
+      if (iree_hal_hip_async_allocation_queue_count(&queue_item->queue) != 0) {
+        iree_hal_hip_async_allocation_t allocation =
+            iree_hal_hip_async_allocation_queue_at(&queue_item->queue, 0);
+        ptr = allocation.pointer;
+        iree_hal_hip_async_allocation_queue_pop_front(&queue_item->queue, 1);
+        if (iree_hal_hip_async_allocation_queue_empty(&queue_item->queue)) {
+          iree_hal_hip_async_allocation_queue_deinitialize(&queue_item->queue);
+          iree_hal_hip_util_tree_erase(&allocator->async_allocation_maps[device_ordinal].tree, 
+            sized_allocations);
+        }
+      }
     }
   }
   iree_slim_mutex_unlock(&allocator->async_allocation_mutex);
