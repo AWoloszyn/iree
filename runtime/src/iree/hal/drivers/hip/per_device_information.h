@@ -21,6 +21,7 @@ typedef struct iree_hal_hip_per_device_info_t {
   hipDevice_t hip_device;
   hipStream_t hip_dispatch_stream;
   hipStream_t hip_async_memory_stream;
+  hipStream_t hip_external_sync_stream;
 
   iree_hal_stream_tracing_context_t* tracing_context;
 

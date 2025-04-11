@@ -120,3 +120,12 @@ IREE_HAL_HIP_REQUIRED_PFN_DECL(hipStreamDestroy, hipStream_t)
 IREE_HAL_HIP_REQUIRED_PFN_DECL(hipStreamSynchronize, hipStream_t)
 IREE_HAL_HIP_REQUIRED_PFN_DECL(hipStreamWaitEvent, hipStream_t, hipEvent_t,
                                unsigned int)
+
+IREE_HAL_HIP_REQUIRED_PFN_DECL(hipStreamWriteValue64,
+        hipStream_t, void*, uint64_t, unsigned int);
+IREE_HAL_HIP_REQUIRED_PFN_DECL(hipStreamWaitValue64,
+        hipStream_t, void*, uint64_t, unsigned int, uint64_t);
+
+IREE_HAL_HIP_REQUIRED_PFN_DECL(hipExtMallocWithFlags,
+    void**, size_t, unsigned int);
+    

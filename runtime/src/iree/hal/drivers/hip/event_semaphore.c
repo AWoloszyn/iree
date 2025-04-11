@@ -77,6 +77,7 @@ typedef struct iree_hal_hip_semaphore_queue_item_t {
   iree_hal_hip_per_device_info_t* created_device;
   bool has_been_waited_on;
   bool has_been_signaled;
+  bool has_been_signaled_externally;
   bool is_external;
 } iree_hal_hip_semaphore_queue_item_t;
 
@@ -101,11 +102,14 @@ typedef struct iree_hal_hip_semaphore_t {
     uint8_t inline_storage[sizeof(iree_hal_hip_util_tree_node_t) * 16];
   } event_queue;
 
+  // External synchronization pointer, this is so that we can
+  // use memory operations to synchronize between streams, 
+  // instead of having to block the main thread.
+  hipDeviceptr_t external_sync_ptr;
+
   // Notify any potential CPU waiters that this semaphore
   // has changed state.
   iree_notification_t state_notification;
-
-  iree_notification_t external_event_notification;
 
   iree_hal_hip_device_topology_t devices;
 
@@ -157,7 +161,6 @@ iree_status_t iree_hal_hip_event_semaphore_create(
       sizeof(semaphore->event_queue.inline_storage),
       &semaphore->event_queue.tree);
   iree_notification_initialize(&semaphore->state_notification);
-  iree_notification_initialize(&semaphore->external_event_notification);
 
   iree_slim_mutex_initialize(&semaphore->mutex);
   semaphore->current_visible_value = initial_value;
@@ -180,7 +183,6 @@ static void iree_hal_hip_semaphore_destroy(
   iree_status_ignore(semaphore->failure_status);
   iree_slim_mutex_deinitialize(&semaphore->mutex);
 
-  iree_notification_deinitialize(&semaphore->external_event_notification);
   iree_notification_deinitialize(&semaphore->state_notification);
   for (iree_hal_hip_util_tree_node_t* i =
            iree_hal_hip_util_tree_first(&semaphore->event_queue.tree);
@@ -202,6 +204,11 @@ static void iree_hal_hip_semaphore_destroy(
       iree_allocator_free(host_allocator, work_item);
       work_item = next;
     }
+  }
+  if (semaphore->external_sync_ptr) {
+    iree_status_ignore(IREE_HIP_CALL_TO_STATUS(
+      semaphore->symbols,
+      hipFree(semaphore->external_sync_ptr)));
   }
   iree_hal_hip_util_tree_deinitialize(&semaphore->event_queue.tree);
   iree_allocator_free(host_allocator, semaphore);
@@ -426,7 +433,6 @@ static iree_status_t iree_hal_hip_event_semaphore_run_scheduled_callbacks(
   if (semaphore->max_value_to_be_signaled < semaphore->current_visible_value) {
     semaphore->max_value_to_be_signaled = iree_max(
         semaphore->max_value_to_be_signaled, semaphore->current_visible_value);
-    iree_notification_post(&semaphore->external_event_notification, IREE_ALL_WAITERS);
   }
 
   iree_status_t status = iree_status_clone(semaphore->failure_status);
@@ -557,7 +563,6 @@ iree_status_t iree_hal_hip_semaphore_notify_forward_progress_to(
   if (value > semaphore->max_value_to_be_signaled) {
     semaphore->max_value_to_be_signaled =
         iree_max(semaphore->max_value_to_be_signaled, value);
-    iree_notification_post(&semaphore->external_event_notification, IREE_ALL_WAITERS);
   }
   iree_slim_mutex_unlock(&semaphore->mutex);
 
@@ -689,43 +694,50 @@ iree_status_t iree_hal_hip_semaphore_create_event_and_record_if_necessary(
     }
 
     if (iree_status_is_ok(status)) {
-      iree_hal_hip_semaphore_queue_item_t* value = 
+      iree_hal_hip_semaphore_queue_item_t* item = 
         (iree_hal_hip_semaphore_queue_item_t*)iree_hal_hip_util_tree_node_get_value(node);
-      if (!value->event) {
+      if (!item->event) {
         status = iree_hal_hip_event_pool_acquire(
           event_pool, 1,
-            &value->event);
-          value->created_device = device;
+            &item->event);
+          item->created_device = device;
       }
-      if (iree_status_is_ok(status) && !value->has_been_signaled) {
+      if (iree_status_is_ok(status) && item->is_external) {
+        status = IREE_HIP_CALL_TO_STATUS(
+          semaphore->symbols,
+          hipStreamWriteValue64(dispatch_stream,
+            semaphore->external_sync_ptr, value, 0));
+        item->has_been_signaled = true;
+      }
+      if (iree_status_is_ok(status) && !item->has_been_signaled) {
         // If the event was created on a different device, then we
         // have to actually signal a secondary event first.
-        if (device != value->created_device) {
-          status = iree_hal_hip_event_pool_acquire(event_pool, 1, &value->secondary_event);
+        if (device != item->created_device) {
+          status = iree_hal_hip_event_pool_acquire(event_pool, 1, &item->secondary_event);
           if (iree_status_is_ok(status)) {
             status = IREE_HIP_CALL_TO_STATUS(
                 semaphore->symbols,
-                hipEventRecord(iree_hal_hip_event_handle(value->secondary_event),
+                hipEventRecord(iree_hal_hip_event_handle(item->secondary_event),
                 dispatch_stream));
           }
           if (iree_status_is_ok(status)) {
             status = IREE_HIP_CALL_TO_STATUS(
               semaphore->symbols,
-              hipStreamWaitEvent(value->created_device->hip_async_memory_stream, 
-                  iree_hal_hip_event_handle(value->secondary_event), 0));
+              hipStreamWaitEvent(item->created_device->hip_async_memory_stream, 
+                  iree_hal_hip_event_handle(item->secondary_event), 0));
           }
           if (iree_status_is_ok(status)) {
             status = IREE_HIP_CALL_TO_STATUS(
                 semaphore->symbols,
-                hipEventRecord(iree_hal_hip_event_handle(value->event),
-                                value->created_device->hip_async_memory_stream));
+                hipEventRecord(iree_hal_hip_event_handle(item->event),
+                                item->created_device->hip_async_memory_stream));
           }
         } else {
           status = IREE_HIP_CALL_TO_STATUS(
             semaphore->symbols,
-            hipEventRecord(iree_hal_hip_event_handle(value->event),
+            hipEventRecord(iree_hal_hip_event_handle(item->event),
                             dispatch_stream));
-          value->has_been_signaled = true;
+          item->has_been_signaled = true;
         }
       }
     }
@@ -1117,6 +1129,18 @@ static iree_status_t iree_hal_hip_semaphore_export_timepoint(
       out_external_timepoint->type = IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT;
     }
   }
+  if (!semaphore->external_sync_ptr) {
+    if (iree_status_is_ok(status)) {
+      status = IREE_HIP_CALL_TO_STATUS(
+        semaphore->symbols,
+        hipExtMallocWithFlags(&semaphore->external_sync_ptr, 8, hipMallocSignalMemory));
+    }
+    if (iree_status_is_ok(status)) {
+      status = IREE_HIP_CALL_TO_STATUS(
+        semaphore->symbols,
+        hipMemset(semaphore->external_sync_ptr, 0, 8));
+    }
+  }
   iree_slim_mutex_unlock(&semaphore->mutex);
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -1134,47 +1158,41 @@ bool iree_hal_hip_semaphore_timepoint_already_exported(iree_hal_hip_semaphore_ex
   return ret;
 }
 
-iree_status_t iree_hal_hip_semaphore_wait_until_timepoints_exported(
-  iree_hal_semaphore_t* base_semaphore, uint64_t value) {
+iree_status_t iree_hal_hip_semaphore_signal_external_timepoints(
+  iree_hal_semaphore_t* base_semaphore, uint64_t value,
+  hipStream_t external_sync_stream) {
+  IREE_TRACE_ZONE_BEGIN(z0);
 
-  int64_t value_to_wait_for = 0;
   iree_hal_hip_semaphore_t* semaphore =
       iree_hal_hip_semaphore_cast(base_semaphore);
   iree_slim_mutex_lock(&semaphore->mutex);
+  iree_status_t status = iree_ok_status();
+
   for (iree_hal_hip_util_tree_node_t* i =
     iree_hal_hip_util_tree_first(&semaphore->event_queue.tree);
-      i != NULL; i = iree_hal_hip_util_tree_node_next(i)) {
+      i != NULL && iree_status_is_ok(status); i = iree_hal_hip_util_tree_node_next(i)) {
     if (iree_hal_hip_util_tree_node_get_key(i) > value) {
       break;
     }
     iree_hal_hip_semaphore_queue_item_t* item = 
       (iree_hal_hip_semaphore_queue_item_t*)iree_hal_hip_util_tree_node_get_value(i);
-    if (!item->is_external) {
+    if (!item->is_external || !item->has_been_signaled_externally)  {
       continue;
     }
-    value_to_wait_for = iree_hal_hip_util_tree_node_get_key(i);
+    status = IREE_HIP_CALL_TO_STATUS(
+      semaphore->symbols,
+      hipStreamWaitValue64(external_sync_stream,
+        semaphore->external_sync_ptr, value, hipStreamWaitValueGte , 0xFFFFFFFFFFFFFFFF));
+    if (iree_status_is_ok(status)) {
+      status = IREE_HIP_CALL_TO_STATUS(
+            semaphore->symbols,
+            hipEventRecord(iree_hal_hip_event_handle(item->event),
+            external_sync_stream));
+    }
+    item->has_been_signaled_externally = true;
   }
-  bool do_wait = value_to_wait_for > semaphore->max_value_to_be_signaled;
   iree_slim_mutex_unlock(&semaphore->mutex);
-  // TEMP: busy loop.
-  // Basically if we have any exported timepoints, we want to block this
-  // thread until they at LEAST have been recorded. This is because
-  // once we return it is legal for any other operation to then submit
-  // the exported event, which because of  hip ordering must occur
-  // after the record.
-  if (do_wait) {
-    IREE_TRACE_ZONE_BEGIN(z0);
-    iree_hal_hip_semaphore_external_timepoint_wait_data_t dat = {
-      .semaphore = semaphore,
-      .value = value_to_wait_for
-    };
-    iree_notification_await(
-      &semaphore->external_event_notification,
-      (iree_condition_fn_t)
-      iree_hal_hip_semaphore_timepoint_already_exported,
-        &dat, iree_infinite_timeout());
-    IREE_TRACE_ZONE_END(z0);
-  }
+  IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
 
