@@ -502,6 +502,12 @@ iree_status_t iree_hal_hip_device_create(
           hipStreamCreateWithFlags(&device->devices[i].hip_async_memory_stream,
                                    hipStreamNonBlocking));
     }
+    if (iree_status_is_ok(status)) {
+      status = IREE_HIP_CALL_TO_STATUS(
+        symbols,
+        hipStreamCreateWithFlags(&device->devices[i].hip_external_sync_stream,
+                                 hipStreamNonBlocking));
+    }
 
     // If there are multiple devices, enable peering between them all.
     if (iree_status_is_ok(status) && device_count > 1) {
@@ -596,6 +602,8 @@ static void iree_hal_hip_device_destroy(iree_hal_device_t* base_device) {
         symbols, hipStreamDestroy(device->devices[i].hip_dispatch_stream));
     IREE_HIP_IGNORE_ERROR(
         symbols, hipStreamDestroy(device->devices[i].hip_async_memory_stream));
+    IREE_HIP_IGNORE_ERROR(
+      symbols, hipStreamDestroy(device->devices[i].hip_external_sync_stream));
     // NOTE: This function return hipSuccess though doesn't release the
     // primaryCtx by design on HIP/HCC path.
     IREE_HIP_IGNORE_ERROR(
@@ -1554,11 +1562,12 @@ static iree_status_t iree_hal_hip_device_queue_alloca(
     }
 
     if (iree_status_is_ok(status)) {
-      if (iree_status_is_ok(status)) {    
+      if (iree_status_is_ok(status)) {
         for (iree_host_size_t i = 0; i < signal_semaphore_list.count; ++i) {
-          iree_hal_hip_semaphore_wait_until_timepoints_exported(
+          iree_hal_hip_semaphore_signal_external_timepoints(
             signal_semaphore_list.semaphores[i],
-            signal_semaphore_list.payload_values[i]);
+            signal_semaphore_list.payload_values[i],
+            device->devices[device_ordinal].hip_external_sync_stream);
         }
       }
     
@@ -1653,9 +1662,10 @@ static iree_status_t iree_hal_hip_device_queue_dealloca(
 
     if (iree_status_is_ok(status)) {    
       for (iree_host_size_t i = 0; i < signal_semaphore_list.count; ++i) {
-        iree_hal_hip_semaphore_wait_until_timepoints_exported(
+        iree_hal_hip_semaphore_signal_external_timepoints(
           signal_semaphore_list.semaphores[i],
-          signal_semaphore_list.payload_values[i]);
+          signal_semaphore_list.payload_values[i],
+          device->devices[device_ordinal].hip_external_sync_stream);
       }
     }
 
@@ -2103,9 +2113,10 @@ static iree_status_t iree_hal_hip_device_queue_read(
   }
   if (iree_status_is_ok(status)) {    
     for (iree_host_size_t i = 0; i < signal_semaphore_list.count; ++i) {
-      iree_hal_hip_semaphore_wait_until_timepoints_exported(
+      iree_hal_hip_semaphore_signal_external_timepoints(
         signal_semaphore_list.semaphores[i],
-        signal_semaphore_list.payload_values[i]);
+        signal_semaphore_list.payload_values[i],
+        device->devices[device_ordinal].hip_async_memory_stream);
     }
   }
 
@@ -2121,6 +2132,13 @@ static iree_status_t iree_hal_hip_device_queue_write(
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  iree_hal_hip_device_t* device = iree_hal_hip_device_cast(base_device);
+  uint64_t queue_affinity_mask =
+      ((iree_hal_queue_affinity_t)1 << device->device_count);
+  queue_affinity_mask = queue_affinity_mask | (queue_affinity_mask - 1);
+  queue_affinity &= queue_affinity_mask;
+
+  int device_ordinal = iree_math_count_trailing_zeros_u64(queue_affinity);
 
   // TODO: expose streaming chunk count/size options.
   iree_status_t loop_status = iree_ok_status();
@@ -2136,9 +2154,10 @@ static iree_status_t iree_hal_hip_device_queue_write(
               target_offset, length, flags, options));
 
   for (iree_host_size_t i = 0; i < signal_semaphore_list.count; ++i) {
-    iree_hal_hip_semaphore_wait_until_timepoints_exported(
+    iree_hal_hip_semaphore_signal_external_timepoints(
       signal_semaphore_list.semaphores[i],
-      signal_semaphore_list.payload_values[i]);
+      signal_semaphore_list.payload_values[i],
+        device->devices[device_ordinal].hip_external_sync_stream);
   }
           
   IREE_TRACE_ZONE_END(z0);
@@ -2462,9 +2481,10 @@ static iree_status_t iree_hal_hip_device_queue_execute(
 
   if (iree_status_is_ok(status)) {    
     for (iree_host_size_t i = 0; i < signal_semaphore_list.count; ++i) {
-      iree_hal_hip_semaphore_wait_until_timepoints_exported(
+      iree_hal_hip_semaphore_signal_external_timepoints(
         signal_semaphore_list.semaphores[i],
-        signal_semaphore_list.payload_values[i]);
+        signal_semaphore_list.payload_values[i],
+      device->devices[device_ordinal].hip_external_sync_stream);
     }
   }
 
